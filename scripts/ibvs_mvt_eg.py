@@ -5,39 +5,53 @@ import matplotlib.pyplot as plt
 import spatialmath as sm
 import numpy as np
 
-
-def projection_exp(cam, X, Y, Z):
-    fx = cam.fu
-    fy = cam.fv
-    cx = cam.width // 2
-    cy = cam.height // 2
-    rho_u = cam.rhou
-    rho_v = cam.rhov
-
-    x_ = fx * (X / Z)
-    y_ = fy * (Y / Z)
-    pix_x = x_ / rho_u + cx
-    pix_y = y_ / rho_v + cy
-
-    print(pix_x, pix_y)
-
 def main():
     # camera model
     cam = mv.CentralCamera().Default()
+    print(f"Camera default parameters: {cam}")
 
-    print(cam.project_point([0.2, 0.3, 1]))
-    projection_exp(cam, 0.2, 0.3, 1)
+    d = 0.5
+    z = 1
+    lambda_ = 0.1   # arbitrary value
+    
+    # these are current feature points in world frame (i guess)
+    p1 = [d, -(np.sqrt(3)/4) * d, z]
+    p2 = [-d, -(np.sqrt(3)/4) * d, z]
+    p3 = [0, (np.sqrt(3)/4) * d, z]
+    P = [p1, p2, p3]
 
-    point = np.array([[500], [500]])
-    cam.plot_point(point)
+    # desired image frame points
+    D_P = [[250, 500, 750], [750, 250, 750]]
 
-    point = np.array([[0], [500]])
-    cam.plot_point(point)
 
-    point = np.array([[300], [500]])
-    cam.plot_point(point)
+    # project and plot the points
+    current_points = cam.plot_point(P, pose=sm.SE3(0,0,-5)*sm.SE3.Ry(10, unit='deg'))
+    target_points = cam.plot_point(D_P, 'r*')
+    # logs
+    print(f"Current image points: {current_points}")
+    print(f"Desired image points: {target_points}")
+
+
+    # image jacobian (for all three points)
+    img_jac = cam.visjac_p(current_points, 5)       # we are setting the current point is 5m away from world points (WIP)
+    inv_img_jac = np.linalg.inv(img_jac)
+    print(f"Image Jacobian Matrix: \n{img_jac}\n")
+    print(f"Inv Image Jacobian Matrix: \n{inv_img_jac}\n")
+
+    # compute image pixel velocity
+    target_pixel_velocities = lambda_ * (target_points - current_points)
+    print(f"Target Pixel Velocity: \n{target_pixel_velocities}\n")
+
+
+    # compute camera velocity using image jacobian
+    temp_pix_vel = np.array(target_pixel_velocities).T.flatten()
+    temp_pix_vel = np.array([temp_pix_vel]).T
+    cam_vel = np.matmul(inv_img_jac, temp_pix_vel)
+    print(f"Camera Velocities: \n{cam_vel}\n")
+
 
     plt.show()
 
 if __name__ == "__main__":
+    print('\n', end='')     # just for better visibility
     main()

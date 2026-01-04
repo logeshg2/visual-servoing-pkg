@@ -50,6 +50,11 @@ def main():
     print(f"Camera Velocities: \n{cam_vel}\n")
 
 
+    # next steps:
+    # 1. move the camera or change pose of camera based on velocity ouput from the above
+    # 2. the controller should minimize the output velocity
+    # 3. less than 0.001 or lesser velocity generated should be considered as converged
+
     plt.show()
 
 if __name__ == "__main__":

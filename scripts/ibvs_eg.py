@@ -23,7 +23,7 @@ p3 = [0, (np.sqrt(3)/4) * d, z]
 P = [p1, p2, p3]
 
 # desired image frame points
-D_P = [[250, 500, 750], [750, 250, 750]]
+D_P = [[250, 500, 750], [250, 750, 250]]
 
 
 def projectPoints(cam_pose: sm.SE3):
@@ -85,9 +85,9 @@ def plotting_function(cpose):
     sm.base.plot_point(p2)
     sm.base.plot_point(p3)
 
-    plt.pause(0.05)
-    plt.show(block=False)
-    plt.cla()
+    # plt.pause(0.05)
+    plt.show(block=True)
+    # plt.cla()
 
 def main():
     
@@ -103,7 +103,7 @@ def main():
 
             # 2. compute image jacobian (for all three points) - for 3 points ~> inv(Jcam) is (6, 6) matrix
             # need inv of jacobian for pixel velocity to camera velocity conversion
-            img_jac = cam.visjac_p(current_points, 2)       # we are setting the current point is 5m away from world points (WIP)
+            img_jac = cam.visjac_p(current_points, z)       # we are setting the current point is 5m away from world points (WIP)
             inv_img_jac = np.linalg.inv(img_jac)
             if (DEBUG):
                 print(f"Image Jacobian Matrix: \n{img_jac}\n")
@@ -117,9 +117,9 @@ def main():
             CPose.x += cam_vel[0]
             CPose.y += cam_vel[1]         
             CPose.z += cam_vel[2]
-            # CPose = CPose @ sm.SE3.Rx(theta=cam_vel[3])
-            # CPose = CPose @ sm.SE3.Ry(theta=cam_vel[4])
-            # CPose = CPose @ sm.SE3.Rz(theta=cam_vel[5])
+            CPose = CPose @ sm.SE3.Rx(theta=cam_vel[3])
+            CPose = CPose @ sm.SE3.Ry(theta=cam_vel[4])
+            CPose = CPose @ sm.SE3.Rz(theta=cam_vel[5])
     
             # plotting function
             plotting_function(CPose)

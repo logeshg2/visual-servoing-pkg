@@ -9,10 +9,31 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(std_msgs REQUIRED)
+
+set(action_files
+)
+set(msg_files
+  "msg/ArucoCorner.msg"
+)
+set(srv_files
+)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${action_files}
+  ${msg_files}
+  ${srv_files}
+  DEPENDENCIES std_msgs
+)
+ament_export_dependencies(rosidl_default_runtime)
 
 # Install Python executables
 install(PROGRAMS
   scripts/keypoints_eg.py
+  scripts/black_circle.py
+  scripts/aruco_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

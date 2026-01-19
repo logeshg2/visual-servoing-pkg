@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+#!/home/logesh/robotic_toolbox_ws/toolbox_env/bin/python3
+
+# TODO
+# 1. put target aruco positions in yaml and other constant variables too.
 
 import time
 import numpy as np
@@ -10,6 +13,7 @@ from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
+from fanuc_vel_controller.fanuc_model import Fanuc
 
 
 class IBVS_aruco(Node):
@@ -22,13 +26,13 @@ class IBVS_aruco(Node):
         self.cur_bottom_right = None
         self.cur_bottom_left = None
         # target aruco points
-        self.tar_top_left = None
-        self.tar_top_right = None
-        self.tar_bottom_right = None
-        self.tar_bottom_left = None
+        self.tar_top_left = np.array([370, 149])
+        self.tar_top_right = np.array([376, 259])
+        self.tar_bottom_right = np.array([265, 265])
+        self.tar_bottom_left = np.array([259, 155])
 
         # image jacobian | velocity variables
-        self.pixelVel_gain = 0.1
+        self.pixelVel_gain = 0.0006
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -41,8 +45,10 @@ class IBVS_aruco(Node):
         self.Z = 1000       # distance from camera to target (assuming it is 1m away) - this is point depth
 
         # robot arm controllers
+        self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
+        self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
 
         # PID control (TODO: tune this)
         self.KPX = 2*(0.0001)
@@ -57,9 +63,9 @@ class IBVS_aruco(Node):
 
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
-        self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, self.vel_gen_group)
+        self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
-        self.main_timer = self.create_timer(1/20, self.main_timer_cb, self.vel_gen_group)
+        self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
 
 
     def trigger_servoing_cb(self, request, response):
@@ -104,6 +110,7 @@ class IBVS_aruco(Node):
             self.cur_top_right = None
             self.cur_bottom_right = None
             self.cur_bottom_left = None
+            self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     def computePixelPointVel(self, des_point, cur_point):
         """
@@ -122,7 +129,7 @@ class IBVS_aruco(Node):
         bottom_left_pix_vel = self.computePixelPointVel(self.tar_bottom_left, self.cur_bottom_left)
         # flatten pixel velocities (here - 8x1 vector)
         self.pixelVel = np.array([top_left_pix_vel.flatten(), top_right_pix_vel.flatten(), bottom_right_pix_vel.flatten(), bottom_left_pix_vel.flatten()])
-        self.pixelVel = self.pixelVel.flatten().T     # [[u1_dot], [v1_dot], [u2_dot], [v2_dot], [u3_dot], [v3_dot], [u4_dot], [v4_dot]] - 8x1
+        self.pixelVel = np.array([self.pixelVel.flatten()]).T     # [[u1_dot], [v1_dot], [u2_dot], [v2_dot], [u3_dot], [v3_dot], [u4_dot], [v4_dot]] - 8x1
 
         # compute jacobian matrix (combain all for points interation matrix)
         top_left_jacob = self.computeImgPointJacobian(self.cur_top_left[0], self.cur_top_left[1])
@@ -156,17 +163,56 @@ class IBVS_aruco(Node):
             self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
 
             # for now - lets servo only on x, y, and z (or 3D servoing)
-            self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
-            self.ee_vel[0] = (self.vel_error[0] * self.KPX) + (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
-            self.ee_vel[1] = (self.vel_error[1] * self.KPY) + (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
-            self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
+            # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
+            self.vel_error = self.curCamVel
+            self.ee_vel[0] = (self.vel_error[0] * self.KPX) #+ (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
+            self.ee_vel[1] = (self.vel_error[1] * self.KPY) #+ (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
+            # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
+            # self.ee_vel[0] *= -1    # invert x-axis
+            self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
             self.prevCamVel = self.curCamVel.copy()
         else:
             self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-    def main_timer_cb(self):
-        pass
 
+    def main_timer_cb(self):
+        if (self.triggered):
+            # compute EE velocity
+            self.computeEEVel()
+
+            # read the current cartesion position
+            cur_joint_pose = self.bot.read_current_joint_position()
+            # current joint position (deg to rad) + J23 coupling
+            rad_arr = np.deg2rad(cur_joint_pose)
+            # remove coupling - J[3]' = J[3] + J[2]
+            rad_arr[2] = rad_arr[2] + rad_arr[1]
+
+            # ee velocity to joint velocity
+            current_jacobian = self.fanuc_model.jacobe(q=np.array(rad_arr))             # 6x6 matrix
+            joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.ee_vel]).T)  # 6x6 @ 6x1 => 6x1
+            joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
+
+            # some filtering has to be done on the joint velocities before adding to the current joint positioni
+            ### TODO: filter to joint_vels
+            
+            # worked after inverting the target velocity of joint 2 (may be it is inverted)
+            joint_vels[1] *= -1
+
+            # removing velocity on J4 - safety reasons
+            joint_vels[3] = 0.0
+
+            # add that to current joint position
+            target_rad_arr = np.add(rad_arr, joint_vels)
+            
+            # adding coupling - J[3]' = J[3] - J[2]
+            target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
+            target_joint_pose = np.rad2deg(target_rad_arr).tolist()
+
+            self.get_logger().info(f"target ee vel: {self.ee_vel}")
+
+            # write register and sync-movement
+            self.get_logger().info(f"Computed Joint Position: {target_joint_pose}")
+            self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
 def main():
     rclpy.init()

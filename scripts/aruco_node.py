@@ -20,7 +20,7 @@ class ArucoNode(Node):
     def __init__(self):
         super().__init__("aruco_node")
 
-        self.declare_parameter('camera_id', 0)
+        self.declare_parameter('camera_id', 4)
         self.declare_parameter('frame_width', 640.0)
         self.declare_parameter('frame_height', 480.0)
         self.cam_dev_id = self.get_parameter('camera_id').get_parameter_value().integer_value
@@ -40,11 +40,17 @@ class ArucoNode(Node):
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
         # aruco detector
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
         parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
         self.aruco_center = None
         self.corner = None
+
+        # target aruco points
+        self.tar_top_left = np.array([370, 149])
+        self.tar_top_right = np.array([376, 259])
+        self.tar_bottom_right = np.array([265, 265])
+        self.tar_bottom_left = np.array([259, 155])
 
         # ros2 communication variables
         self.cvBridge = CvBridge()
@@ -85,6 +91,28 @@ class ArucoNode(Node):
             self.aruco_center = np.array([-1, -1])
             self.corner = None
 
+    def plotTargetMarkers(self):
+        # mark center of the frame
+        # self.latest_image = cv2.circle(self.latest_image, self.frame_center, radius=10, thickness=-1, color=(0, 0, 255))
+        
+        # mark the target aruco point in the image frame
+        cv2.circle(self.latest_image, self.tar_top_left, radius=3, thickness=-1, color=(0, 0, 255))
+        cv2.circle(self.latest_image, self.tar_top_right, radius=3, thickness=-1, color=(0, 0, 255))
+        cv2.circle(self.latest_image, self.tar_bottom_right, radius=3, thickness=-1, color=(0, 0, 255))
+        cv2.circle(self.latest_image, self.tar_bottom_left, radius=3, thickness=-1, color=(0, 0, 255))
+        # center
+        p1 = self.tar_top_left
+        p3 = self.tar_bottom_right
+        cx = p1[0] + (p3[0] - p1[0]) // 2
+        cy = p1[1] + (p3[1] - p1[1]) // 2
+        cv2.circle(self.latest_image, [cx, cy], radius=4, thickness=-1, color=(0, 255, 255))
+        # boundaries
+        # cv2.line(self.latest_image, self.tar_top_left, self.tar_top_right, (230, 216, 173), 2)
+        # cv2.line(self.latest_image, self.tar_top_right, self.tar_bottom_right, (230, 216, 173), 2)
+        # cv2.line(self.latest_image, self.tar_bottom_right, self.tar_bottom_left, (230, 216, 173), 2)
+        # cv2.line(self.latest_image, self.tar_bottom_left, self.tar_top_left, (230, 216, 173), 2)
+
+
     def image_reader_timer(self):
         # acquire latest image
         if (self.cam_obj.isOpened()):
@@ -100,8 +128,8 @@ class ArucoNode(Node):
         # processed image and publish it
         self.process_image()
 
-        # mark center of the frame
-        self.latest_image = cv2.circle(self.latest_image, self.frame_center, radius=10, thickness=-1, color=(0, 0, 255))
+        # draw target markers
+        self.plotTargetMarkers()        
 
         # publish aruco center and aruco corners array
         if (self.aruco_center is not None and self.corner is not None):

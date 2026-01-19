@@ -13,7 +13,7 @@ from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
-from fanuc_vel_controller.fanuc_model import Fanuc
+from fanuc_vel_controller.fanuc_model import Fanuc, sm
 
 
 class IBVS_aruco(Node):
@@ -43,6 +43,14 @@ class IBVS_aruco(Node):
         self.cx = 320.0
         self.cy = 240.0
         self.Z = 1000       # distance from camera to target (assuming it is 1m away) - this is point depth
+
+        # link 6 (or end-effector) to camera transform
+        self.eTc = sm.SE3(0.070, 0.0, 0.120)
+        self.eTc *= sm.SE3().Rz(np.deg2rad(90))
+        self.ADeTc = np.zeros((6, 6))      # adjoint transformation
+        self.ADeTc[0:3, 0:3] = self.eTc.R
+        self.ADeTc[3:6, 3:6] = self.eTc.R
+        self.ADeTc[3:6, 0:3] = np.multiply(np.array([self.eTc.t]).T, self.eTc.R)
 
         # robot arm controllers
         self.fanuc_model = Fanuc()
@@ -162,13 +170,17 @@ class IBVS_aruco(Node):
             self.curCamVel = self.computeCamVel()
             self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
 
+            # camera velocity to end effector velocity
+            temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
+
             # for now - lets servo only on x, y, and z (or 3D servoing)
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
-            self.vel_error = self.curCamVel
+            self.vel_error = temp_ee_vel
             self.ee_vel[0] = (self.vel_error[0] * self.KPX) #+ (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
             self.ee_vel[1] = (self.vel_error[1] * self.KPY) #+ (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
-            # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
-            # self.ee_vel[0] *= -1    # invert x-axis
+            self.ee_vel[2] = (self.vel_error[2] * self.KPZ) #+ (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
+            
+            self.ee_vel[0] *= -1    # invert x-axis
             self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
             self.prevCamVel = self.curCamVel.copy()
         else:

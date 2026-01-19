@@ -34,6 +34,7 @@ install(PROGRAMS
   scripts/keypoints_eg.py
   scripts/black_circle.py
   scripts/aruco_node.py
+  visual_servoing_pkg/ibvs_aruco_corner.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

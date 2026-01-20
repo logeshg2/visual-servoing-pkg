@@ -32,31 +32,37 @@ class IBVS_aruco(Node):
         self.tar_bottom_left = np.array([259, 155])
 
         # image jacobian | velocity variables
-        self.pixelVel_gain = 0.0006
+        self.pixelVel_gain = 0.01
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         # camera properties
-        self.K = np.load('/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/cameraParams.npz')['arr_0']
-        self.Kinv = np.linalg(self.K)
+        # self.K = np.load('/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/cameraParams.npz')['arr_0']
+        self.K = np.array([
+            [900.0, 0.0, 320.0],
+            [0.0, 900.0, 240.0],
+            [0.0, 0.0, 1.0]
+        ])
+        self.Kinv = np.linalg.inv(self.K)
         self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth
 
         # link 6 (or end-effector) to camera transform
         self.eTc = sm.SE3(0.070, 0.0, 0.120)
         self.eTc *= sm.SE3().Rz(np.deg2rad(90))
-        self.ADeTc = np.zeros((6, 6))      # adjoint transformation
+        self.ADeTc = np.zeros((6, 6))           # adjoint transformation
         self.ADeTc[0:3, 0:3] = self.eTc.R
         self.ADeTc[3:6, 3:6] = self.eTc.R
-        self.ADeTc[3:6, 0:3] = np.multiply(np.array([self.eTc.t]).T, self.eTc.R)
+        self.ADeTc[0:3, 3:6] = np.multiply(np.array([self.eTc.t]).T, self.eTc.R)
+        self.ADcTe = np.linalg.inv(self.ADeTc)  # opposite adjoint transformation
 
         # robot arm controllers
         self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
-        self.dt = 0.5   # parameter for velocity integration
+        self.dt = 1.0   # parameter for velocity integration
 
         # PID control (TODO: tune this)
         self.KPX = 2*(0.0001)
@@ -150,29 +156,20 @@ class IBVS_aruco(Node):
         bottom_left_jacob = self.computeImgPointJacobian(self.cur_bottom_left[0], self.cur_bottom_left[1])
         # points jacobian (for all for points) - 8x6 matrix
         pointsJacob = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
-        # make it as 8x8 square matrix - by adding 2 zeros at end on each row
-        np.append(pointsJacob[0], [0.0, 0.0])
-        np.append(pointsJacob[1], [0.0, 0.0])
-        np.append(pointsJacob[2], [0.0, 0.0])
-        np.append(pointsJacob[3], [0.0, 0.0])
-        np.append(pointsJacob[4], [0.0, 0.0])
-        np.append(pointsJacob[5], [0.0, 0.0])
-        np.append(pointsJacob[6], [0.0, 0.0])
-        np.append(pointsJacob[7], [0.0, 0.0])
 
         # compute camVel 
         # camVel = inv(pointsJacobian) @ pixelVel
-        camVel = np.linalg.pinv(pointsJacob) @ self.pixelVel        # (8x1) = (8x8) @ (8x1)
-        # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz, 0, 0]
+        camVel = np.linalg.pinv(pointsJacob) @ self.pixelVel        # (6x1) = (6x8) @ (8x1)
+        # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
 
-        return camVel[:6].flatten()
+        return camVel.flatten()
     
     def computeEEVel(self):
         # check aruco corners detection
         if (self.cur_top_left is not None):
             # compute desired camera velocity
             self.curCamVel = self.computeCamVel()
-            self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
+            # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
 
             # camera velocity to end effector velocity
             temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
@@ -194,11 +191,19 @@ class IBVS_aruco(Node):
         else:
             self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
+    def integrateVel(self, qpos, qvel):
+        # update joint position by integrating velocity
+        for i in range(6):
+            qpos[i] += (self.dt * qvel[i])
+        
+        return qpos
+
 
     def main_timer_cb(self):
         if (self.triggered):
             # compute EE velocity
             self.computeEEVel()
+            self.get_logger().info(f"EE Vel: {np.round(self.ee_vel, 4)}")
 
             # read the current cartesion position
             cur_joint_pose = self.bot.read_current_joint_position()
@@ -211,7 +216,9 @@ class IBVS_aruco(Node):
             current_jacobian = self.fanuc_model.jacobe(q=np.array(rad_arr))             # 6x6 matrix
             joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.ee_vel]).T)  # 6x6 @ 6x1 => 6x1
             joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
+            # (i guess) - joint_vels are in rad/sec
 
+            """
             # some filtering has to be done on the joint velocities before adding to the current joint positioni
             ### TODO: filter to joint_vels
             
@@ -223,26 +230,27 @@ class IBVS_aruco(Node):
 
             # add that to current joint position
             target_rad_arr = np.add(rad_arr, joint_vels)
+            """
+
+            target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             
             # adding coupling - J[3]' = J[3] - J[2]
             target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
             target_joint_pose = np.rad2deg(target_rad_arr).tolist()
 
-            self.get_logger().info(f"target ee vel: {self.ee_vel}")
-
             # write register and sync-movement
-            self.get_logger().info(f"Computed Joint Position: {target_joint_pose}")
+            self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")
             self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
 def main():
     rclpy.init()
 
-    try:
-        node = IBVS_aruco()
-        rclpy.spin(node)
-    except Exception as e:
-        print(f"Shutting down IBVS node:\nException: {e}")
-        node.destroy_node()
+    # try:
+    node = IBVS_aruco()
+    rclpy.spin(node)
+    # except Exception as e:
+        # print(f"Shutting down IBVS node:\nException: {e}")
+        # node.destroy_node()
         # rclpy.shutdown()
 
 if __name__ == "__main__":

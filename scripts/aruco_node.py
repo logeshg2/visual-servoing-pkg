@@ -93,8 +93,14 @@ class ArucoNode(Node):
 
     def plotTargetMarkers(self):
         # mark center of the frame
-        # self.latest_image = cv2.circle(self.latest_image, self.frame_center, radius=10, thickness=-1, color=(0, 0, 255))
-        
+        # cv2.circle(self.latest_image, self.frame_center, radius=5, thickness=-1, color=(255, 0, 0))
+        cv2.line(self.latest_image, (self.frame_center[0]-10, self.frame_center[1]-10), (self.frame_center[0]+10, self.frame_center[1]+10), (255,0,0), 2)
+        cv2.line(self.latest_image, (self.frame_center[0]-10, self.frame_center[1]+10), (self.frame_center[0]+10, self.frame_center[1]-10), (255,0,0), 2)
+        # mark xy image plane
+        cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0] + 100, self.frame_center[1]], (0,0,255), 2)     # X
+        cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0], self.frame_center[1] + 100], (0,255,0), 2)     # Y
+
+
         # mark the target aruco point in the image frame
         cv2.circle(self.latest_image, self.tar_top_left, radius=3, thickness=-1, color=(0, 0, 255))
         cv2.circle(self.latest_image, self.tar_top_right, radius=3, thickness=-1, color=(0, 0, 255))

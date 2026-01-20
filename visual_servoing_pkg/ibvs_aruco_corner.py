@@ -39,10 +39,9 @@ class IBVS_aruco(Node):
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         # camera properties
-        self.fx = self.fy = 950.0
-        self.cx = 320.0
-        self.cy = 240.0
-        self.Z = 1000       # distance from camera to target (assuming it is 1m away) - this is point depth
+        self.K = np.load('/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/cameraParams.npz')['arr_0']
+        self.Kinv = np.linalg(self.K)
+        self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth
 
         # link 6 (or end-effector) to camera transform
         self.eTc = sm.SE3(0.070, 0.0, 0.120)
@@ -57,6 +56,7 @@ class IBVS_aruco(Node):
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
+        self.dt = 0.5   # parameter for velocity integration
 
         # PID control (TODO: tune this)
         self.KPX = 2*(0.0001)
@@ -92,18 +92,22 @@ class IBVS_aruco(Node):
         response.message = "trigger successful"
         return response
 
-    def computeImgPointJacobian(self, u, v, Z = 1000):
+    def computeImgPointJacobian(self, u, v, Z = 2):
         """
         Function 'computeImgPointJacobian' is used to compute image jacobian or interaction matrix (J) of the given pixel point (u, v).
         """
         # compute image coordinates (x, y) from (u, v)
-        x = (u - self.cx) / self.fx
-        y = (v - self.cy) / self.fy
+        # x = (u - self.cx) / self.fx
+        # y = (v - self.cy) / self.fy
+        point = np.array([[u,v,1]]).T
+        xy = self.Kinv @ point
+        x = xy[0, 0]
+        y = xy[1, 0]
         Z = Z      # point (x, y) depth (in world frame)
 
         # image jacobian template(or formula) - 2x6
-        img_jacobian = np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
-                                 [0, (-1/Z), (y/Z), (1+(y*y)), (-x*y), -x]])
+        img_jacobian = self.K[0:2, 0:2] @ np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
+                                                    [0, (-1/Z), (y/Z), (1+(y*y)), (-x*y), -x]])
         
         return img_jacobian
 
@@ -174,14 +178,18 @@ class IBVS_aruco(Node):
             temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
 
             # for now - lets servo only on x, y, and z (or 3D servoing)
+            self.ee_vel[0] = temp_ee_vel[0]
+            self.ee_vel[1] = temp_ee_vel[1]
+            self.ee_vel[2] = temp_ee_vel[2]
+
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
-            self.vel_error = temp_ee_vel
-            self.ee_vel[0] = (self.vel_error[0] * self.KPX) #+ (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
-            self.ee_vel[1] = (self.vel_error[1] * self.KPY) #+ (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
-            self.ee_vel[2] = (self.vel_error[2] * self.KPZ) #+ (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
-            
-            self.ee_vel[0] *= -1    # invert x-axis
-            self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
+            # self.vel_error = temp_ee_vel
+            # self.ee_vel[0] = (self.vel_error[0] * self.KPX) + (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
+            # self.ee_vel[1] = (self.vel_error[1] * self.KPY) + (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
+            # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
+            # self.ee_vel[0] *= -1    # invert x-axis
+            # self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
+
             self.prevCamVel = self.curCamVel.copy()
         else:
             self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

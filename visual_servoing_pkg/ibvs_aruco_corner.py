@@ -32,7 +32,7 @@ class IBVS_aruco(Node):
         self.tar_bottom_left = np.array([259, 155])
 
         # image jacobian | velocity variables
-        self.pixelVel_gain = 0.01
+        self.pixelVel_gain = 0.02
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -75,6 +75,18 @@ class IBVS_aruco(Node):
         self.KIZ = 1*(0.000001)
         self.KDZ = 0*(0.00001)
 
+        # velocity filter
+        self.noPoints = 10
+        self.maFilterArr = np.array([
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+        ])
+        self.maIdx = 0
+
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
         self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.vel_gen_group)
@@ -98,7 +110,7 @@ class IBVS_aruco(Node):
         response.message = "trigger successful"
         return response
 
-    def computeImgPointJacobian(self, u, v, Z = 2):
+    def computeImgPointJacobian(self, u, v, Z = 1):
         """
         Function 'computeImgPointJacobian' is used to compute image jacobian or interaction matrix (J) of the given pixel point (u, v).
         """
@@ -128,7 +140,7 @@ class IBVS_aruco(Node):
             self.cur_top_right = None
             self.cur_bottom_right = None
             self.cur_bottom_left = None
-            self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     def computePixelPointVel(self, des_point, cur_point):
         """
@@ -166,7 +178,7 @@ class IBVS_aruco(Node):
     
     def computeEEVel(self):
         # check aruco corners detection
-        if (self.cur_top_left is not None):
+        if (self.cur_top_left is not None and self.cur_top_left[0] != -1):
             # compute desired camera velocity
             self.curCamVel = self.computeCamVel()
             # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
@@ -178,6 +190,9 @@ class IBVS_aruco(Node):
             self.ee_vel[0] = temp_ee_vel[0]
             self.ee_vel[1] = temp_ee_vel[1]
             self.ee_vel[2] = temp_ee_vel[2]
+            # self.ee_vel[3] = temp_ee_vel[3]
+            # self.ee_vel[4] = temp_ee_vel[4]
+            # self.ee_vel[5] = temp_ee_vel[5]
 
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
             # self.vel_error = temp_ee_vel
@@ -189,7 +204,7 @@ class IBVS_aruco(Node):
 
             self.prevCamVel = self.curCamVel.copy()
         else:
-            self.ee_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     def integrateVel(self, qpos, qvel):
         # update joint position by integrating velocity
@@ -198,12 +213,33 @@ class IBVS_aruco(Node):
         
         return qpos
 
+    def maVelFilter(self, jointVels):
+        """
+        Function to perform filtering on computed velocity.
+        using simple `Moving Average` filter approach here. 
+        """
+        # TODO: use matrix multiplication to do this - instead of brute for approach
+
+        fVels = np.array([0.0 for i in range(6)])
+        for idx in range(6):    # iterate over joints
+            self.maFilterArr[idx][self.maIdx] = jointVels[idx]
+            fVels[idx] = np.sum(self.maFilterArr[idx]) / self.noPoints
+        
+        self.maIdx += 1
+        self.maIdx %= self.noPoints
+
+        return fVels
+
 
     def main_timer_cb(self):
         if (self.triggered):
             # compute EE velocity
             self.computeEEVel()
-            self.get_logger().info(f"EE Vel: {np.round(self.ee_vel, 4)}")
+            # self.get_logger().info(f"EE Vel: {self.ee_vel}")
+
+            # velocity filter (TODO: Kalman filter instead on moving average)
+            self.ee_vel = self.maVelFilter(self.ee_vel)
+            print(np.round(self.ee_vel, 4))
 
             # read the current cartesion position
             cur_joint_pose = self.bot.read_current_joint_position()
@@ -220,7 +256,7 @@ class IBVS_aruco(Node):
 
             """
             # some filtering has to be done on the joint velocities before adding to the current joint positioni
-            ### TODO: filter to joint_vels
+            ### TODO: filter to joint_vels - low pass filter like Kalman filter or Alpha-Beta filter
             
             # worked after inverting the target velocity of joint 2 (may be it is inverted)
             joint_vels[1] *= -1
@@ -239,7 +275,7 @@ class IBVS_aruco(Node):
             target_joint_pose = np.rad2deg(target_rad_arr).tolist()
 
             # write register and sync-movement
-            self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")
+            # self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")
             self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
 def main():

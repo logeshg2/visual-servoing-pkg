@@ -151,6 +151,10 @@ class ArucoNode(Node):
             corner_msg.bottom_right = np.array(self.corner[2], np.int64)
             corner_msg.bottom_left = np.array(self.corner[3], np.int64)
             self.corner_pub.publish(corner_msg)
+        else:
+            corner_msg = ArucoCorner()
+            corner_msg.top_left = np.array([-1, -1])
+            self.corner_pub.publish(corner_msg)
 
         # publish processed image
         msg = Image()

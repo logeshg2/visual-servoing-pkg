@@ -4,6 +4,7 @@
 # 1. put target aruco positions in yaml and other constant variables too.
 
 import time
+import pickle
 import numpy as np
 
 import rclpy
@@ -38,19 +39,23 @@ class IBVS_aruco(Node):
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        # camera properties
-        # self.K = np.load('/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/cameraParams.npz')['arr_0']
-        self.K = np.array([
-            [900.0, 0.0, 320.0],
-            [0.0, 900.0, 240.0],
-            [0.0, 0.0, 1.0]
-        ])
+        # camera intrinsic properties
+        cameraParam_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
+        self.K = pickle.load(cameraParam_fp)
         self.Kinv = np.linalg.inv(self.K)
-        self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth
+        self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
+        # camera extrinsic properties
+        camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")
+        camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
+        self.camTrans = pickle.load(camTrans_fp)
+        self.camRotm = pickle.load(camRotm_fp)
 
         # link 6 (or end-effector) to camera transform
-        self.eTc = sm.SE3(0.070, 0.0, 0.120)
-        self.eTc *= sm.SE3().Rz(np.deg2rad(90))
+        # self.eTc = sm.SE3(0.070, 0.0, 0.120)
+        # self.eTc *= sm.SE3().Rz(np.deg2rad(90))
+        self.eTc = sm.SE3()
+        self.eTc.t = self.camTrans
+        self.eTc.R = self.camRotm
         self.ADeTc = np.zeros((6, 6))           # adjoint transformation
         self.ADeTc[0:3, 0:3] = self.eTc.R
         self.ADeTc[3:6, 3:6] = self.eTc.R
@@ -62,7 +67,7 @@ class IBVS_aruco(Node):
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
-        self.dt = 1.0   # parameter for velocity integration
+        self.dt = 0.5   # parameter for velocity integration
 
         # PID control (TODO: tune this)
         self.KPX = 2*(0.0001)
@@ -110,7 +115,7 @@ class IBVS_aruco(Node):
         response.message = "trigger successful"
         return response
 
-    def computeImgPointJacobian(self, u, v, Z = 1):
+    def computeImgPointJacobian(self, u, v, Z = 0.3):
         """
         Function 'computeImgPointJacobian' is used to compute image jacobian or interaction matrix (J) of the given pixel point (u, v).
         """
@@ -185,6 +190,7 @@ class IBVS_aruco(Node):
 
             # camera velocity to end effector velocity
             temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
+            # print(np.round(temp_ee_vel, 4))
 
             # for now - lets servo only on x, y, and z (or 3D servoing)
             self.ee_vel[0] = temp_ee_vel[0]

@@ -34,7 +34,9 @@ install(PROGRAMS
   scripts/keypoints_eg.py
   scripts/black_circle.py
   scripts/aruco_node.py
+  scripts/aruco_board_node.py
   visual_servoing_pkg/ibvs_aruco_corner.py
+  visual_servoing_pkg/pbvs_aruco_pose.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

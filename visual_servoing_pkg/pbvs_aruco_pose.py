@@ -6,6 +6,7 @@
 import time
 import pickle
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 import rclpy
 from rclpy.node import Node
@@ -68,12 +69,12 @@ class PBVS_aruco(Node):
         self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
-        self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
-        self.dt = 0.5   # parameter for velocity integration
+        self.tracking_pose = [60.0, 300.0, 120.0, 179.65, 0.69, 67.63]
+        self.dt = 0.6   # parameter for velocity integration
 
         # PID control (TODO: tune this)
-        self.KPX = 2*(0.0001)
-        self.KIX = 1*(0.000001)
+        self.KPX = 5*(0.0001)
+        self.KIX = 2*(0.000001)
         self.KDX = 0*(0.00001)
         self.KPY = 2*(0.0001)
         self.KIY = 1*(0.000001)
@@ -140,6 +141,7 @@ class PBVS_aruco(Node):
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
             self.arucoPose = sm.SE3(msg.position.x, msg.position.y, msg.position.z)
+            self.arucoPose.t *= 1000        # to mm
             quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
             self.arucoPose.R = quat.R
         else:
@@ -185,27 +187,52 @@ class PBVS_aruco(Node):
         if (self.arucoPose is not None):
             # current pose of end effector
             curEEPose = np.array(self.bot.read_current_cartesian_pose())    # [x, y, z, w, p, r]
-            # NOTE: from here EEPose to cameraPose also can be computed using transformation [IMP]
-            # current aruco board pose
-            trans = self.arucoPose.t
-            euls = np.rad2deg(self.arucoPose.eulervec())     # [r, p, w]
-            curArucoPose = np.array([trans[0], trans[1], trans[2], euls[2], euls[1], euls[0]])    # [x, y, z, w, p, r]
-            # maintain a constant height above the aruco
-            curArucoPose[2] -= 250.0        # 25cm above the aruco detection
+            
+            # compute transform bTe
+            bTe = sm.SE3(curEEPose[0], curEEPose[1], curEEPose[2])
+            rot = Rotation.from_euler('xyz', [curEEPose[3], curEEPose[4], curEEPose[5]], degrees=True)
+            rotm = rot.as_matrix()
+            bTe.R = rotm
+            
+            # compute transform bTc
+            bTc = bTe @ self.eTc
+            trans = bTc.t
+            euls = Rotation.from_matrix(bTc.R).as_euler('zyx', degrees=True)     # [w, p, r]
+            curCamPose = np.array([trans[0], trans[1], trans[2], euls[0], euls[1], euls[2]])    # [x, y, z, w, p, r]
+            
+            # print(Rotation.from_matrix(bTe.R).as_euler('xyz', degrees=True))
+            # print(bTc)
+
+            # compute transfrom cTo
+            cTo = self.arucoPose
+
+            # NOTE: the above is in camera frame
+            # compute transform bTo
+            bTo = bTc @ cTo
+            # 30cm above the aruco detection
+            bTo.t[2] += 300.0
+
+            # current aruco board pose array (from base brame)
+            trans = bTo.t
+            euls = Rotation.from_matrix(bTo.R).as_euler('zyx', degrees=True)     # [w, p, r]
+            curArucoPose = np.array([trans[0], trans[1], trans[2], euls[0], euls[1], euls[2]])    # [x, y, z, w, p, r]
 
             # compute position error
-            position_error = np.subtract(curArucoPose, curEEPose)       # [[d_x, d_y, d_z, d_r, d_p, d_w]]
+            position_error = np.subtract(curArucoPose, curCamPose)       # [[d_x, d_y, d_z, d_r, d_p, d_w]]
             # adding proportional to position error to get velocity
-            kp = 0.001
-            temp_ee_vel = position_error * kp
+            kp = 0.0001
+            temp_ee_vel = position_error * self.KPX + position_error * self.KIX
+            # temp_ee_vel[0] *= -1
+            temp_ee_vel[0], temp_ee_vel[1] = temp_ee_vel[1], temp_ee_vel[0]
+            # print(np.round(temp_ee_vel, 4))
 
             # for now - lets servo only on x, y, and z
             self.ee_vel[0] = temp_ee_vel[0]
             self.ee_vel[1] = temp_ee_vel[1]
-            self.ee_vel[2] = temp_ee_vel[2]
-            # self.ee_vel[3] = temp_ee_vel[3]
-            # self.ee_vel[4] = temp_ee_vel[4]
-            # self.ee_vel[5] = temp_ee_vel[5]
+            self.ee_vel[2] = temp_ee_vel[2] * -1
+            self.ee_vel[3] = temp_ee_vel[3] * -1
+            self.ee_vel[4] = temp_ee_vel[4]
+            self.ee_vel[5] = temp_ee_vel[5]
 
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
             # self.vel_error = temp_ee_vel
@@ -214,8 +241,7 @@ class PBVS_aruco(Node):
             # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
             # self.ee_vel[0] *= -1    # invert x-axis
             # self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
-
-            self.prevCamVel = self.curCamVel.copy()
+            # self.prevCamVel = self.curCamVel.copy()
         else:
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -251,7 +277,7 @@ class PBVS_aruco(Node):
             # self.get_logger().info(f"EE Vel: {self.ee_vel}")
 
             # velocity filter (TODO: Kalman filter instead on moving average)
-            self.ee_vel = self.maVelFilter(self.ee_vel)
+            # self.ee_vel = self.maVelFilter(self.ee_vel)
             print(np.round(self.ee_vel, 4))
 
             # read the current cartesion position
@@ -280,6 +306,7 @@ class PBVS_aruco(Node):
             # add that to current joint position
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
+            joint_vels[1] *= -1
 
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             

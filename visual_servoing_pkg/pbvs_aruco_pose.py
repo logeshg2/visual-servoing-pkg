@@ -11,7 +11,8 @@ from scipy.spatial.transform import Rotation
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
-from geometry_msgs.msg import Pose
+from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import Pose, TransformStamped
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
@@ -96,6 +97,7 @@ class PBVS_aruco(Node):
         self.maIdx = 0
 
         # ros2 comm variables
+        self.tf_broadcaster = TransformBroadcaster(self)
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
         self.pose_sub = self.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
@@ -223,14 +225,14 @@ class PBVS_aruco(Node):
             kp = 0.0001
             temp_ee_vel = position_error * self.KPX + position_error * self.KIX
             # temp_ee_vel[0] *= -1
-            temp_ee_vel[0], temp_ee_vel[1] = temp_ee_vel[1], temp_ee_vel[0]
+            # temp_ee_vel[0], temp_ee_vel[1] = temp_ee_vel[1], temp_ee_vel[0]
             # print(np.round(temp_ee_vel, 4))
 
             # for now - lets servo only on x, y, and z
             self.ee_vel[0] = temp_ee_vel[0]
             self.ee_vel[1] = temp_ee_vel[1]
-            self.ee_vel[2] = temp_ee_vel[2] * -1
-            self.ee_vel[3] = temp_ee_vel[3] * -1
+            self.ee_vel[2] = temp_ee_vel[2]
+            self.ee_vel[3] = temp_ee_vel[3]
             self.ee_vel[4] = temp_ee_vel[4]
             self.ee_vel[5] = temp_ee_vel[5]
 
@@ -269,12 +271,37 @@ class PBVS_aruco(Node):
 
         return fVels
 
+    def TF_publisher(self):
+        if (self.arucoPose is not None):
+            # broadcast cTo tf
+            tf = TransformStamped()
+            tf.header.stamp = self.get_clock().now().to_msg()
+            tf.header.frame_id = 'camera_link'
+            tf.child_frame_id = "aruco"
+            
+            trans = self.arucoPose.t
+            trans /= 1000.0
+            tf.transform.translation.x = self.arucoPose.t[0]
+            tf.transform.translation.y = self.arucoPose.t[1]
+            tf.transform.translation.z = self.arucoPose.t[2] - 0.3        # NOTE: this may be wrong
+
+            quat = Rotation.from_matrix(self.arucoPose.R).as_quat()
+            tf.transform.rotation.x = quat[0]
+            tf.transform.rotation.y = quat[1]
+            tf.transform.rotation.z = quat[2]
+            tf.transform.rotation.w = quat[3]
+
+            self.tf_broadcaster.sendTransform(tf)
+
 
     def main_timer_cb(self):
         if (self.triggered):
             # compute EE velocity
             self.computeEEVel()
             # self.get_logger().info(f"EE Vel: {self.ee_vel}")
+
+            # publish camera to object tfs to visualize
+            self.TF_publisher()
 
             # velocity filter (TODO: Kalman filter instead on moving average)
             # self.ee_vel = self.maVelFilter(self.ee_vel)
@@ -288,7 +315,7 @@ class PBVS_aruco(Node):
             rad_arr[2] = rad_arr[2] + rad_arr[1]
 
             # ee velocity to joint velocity
-            current_jacobian = self.fanuc_model.jacobe(q=np.array(rad_arr))             # 6x6 matrix
+            current_jacobian = self.fanuc_model.jacob0(q=np.array(rad_arr))             # 6x6 matrix
             joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.ee_vel]).T)  # 6x6 @ 6x1 => 6x1
             joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
             # (i guess) - joint_vels are in rad/sec

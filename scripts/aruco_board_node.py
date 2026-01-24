@@ -9,19 +9,21 @@ import cv2
 import math
 import pickle
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 import rclpy
 from rclpy.node import Node
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Pose
+from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import Pose, TransformStamped
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 class ArucoNode(Node):
     def __init__(self):
         super().__init__("aruco_node")
 
-        self.declare_parameter('camera_id', 2)
+        self.declare_parameter('camera_id', 0)
         self.declare_parameter('frame_width', 640.0)
         self.declare_parameter('frame_height', 480.0)
         self.cam_dev_id = self.get_parameter('camera_id').get_parameter_value().integer_value
@@ -61,6 +63,7 @@ class ArucoNode(Node):
 
         # ros2 communication variables
         self.cvBridge = CvBridge()
+        self.tf_broadcaster = TransformBroadcaster(self)
         self.img_group = MutuallyExclusiveCallbackGroup()
         self.img_publisher = self.create_publisher(Image, "/processed_image", 10, callback_group=self.img_group)
         self.aruco_pose_pub = self.create_publisher(Pose, "/aruco_pose", 10)
@@ -101,6 +104,24 @@ class ArucoNode(Node):
         else:
             self.rvecs = None
             self.tvecs = None
+
+    def TF_publisher(self, trans, quat):
+        # broadcast cTo tf
+        tf = TransformStamped()
+        tf.header.stamp = self.get_clock().now().to_msg()
+        tf.header.frame_id = 'camera_link'
+        tf.child_frame_id = "aruco_target"
+        
+        tf.transform.translation.x = trans[0]
+        tf.transform.translation.y = trans[1]
+        tf.transform.translation.z = trans[2] - 0.3        # NOTE: publish target at a certain height
+
+        tf.transform.rotation.x = quat[0]
+        tf.transform.rotation.y = quat[1]
+        tf.transform.rotation.z = quat[2]
+        tf.transform.rotation.w = quat[3]
+
+        self.tf_broadcaster.sendTransform(tf)
 
     def plotTargetMarkers(self):
         # mark center of the frame
@@ -163,6 +184,9 @@ class ArucoNode(Node):
 
             # publish
             self.aruco_pose_pub.publish(msg)
+
+            # publish tf
+            self.TF_publisher(self.tvecs, quat)
         else:
             msg = Pose()
             msg.position.x = -1.0

@@ -3,6 +3,7 @@
 # TODO
 # 1. put target aruco positions in yaml and other constant variables too.
 
+import csv
 import time
 import pickle
 import numpy as np
@@ -23,6 +24,10 @@ class PBVS_aruco(Node):
     def __init__(self):
         super().__init__("pbvs_aruco_node")
 
+        # degub tools (logging)
+        fp = open("/home/logesh/Desktop/ee_vel.csv", "w")
+        self.writer = csv.writer(fp)
+
         # aruco variables
         self.cur_top_left = None
         self.cur_top_right = None
@@ -38,6 +43,7 @@ class PBVS_aruco(Node):
 
         # image jacobian | velocity variables
         self.pixelVel_gain = 0.02
+        self.lambdaVar =    0.1                # exponential decay factor (Lambda)
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -52,6 +58,7 @@ class PBVS_aruco(Node):
         camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")
         camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
         self.camTrans = pickle.load(camTrans_fp)
+        self.camTrans /= 1000           # mm to m
         self.camRotm = pickle.load(camRotm_fp)
 
         # link 6 (or end-effector) to camera transform
@@ -60,18 +67,41 @@ class PBVS_aruco(Node):
         self.eTc = sm.SE3()
         self.eTc.t = self.camTrans
         self.eTc.R = self.camRotm
-        self.ADeTc = np.zeros((6, 6))           # adjoint transformation
+        # camera to end-effector transform (cTe)
+        self.cTe = self.eTc.inv()
+
+        # adjoint transformation (camera frame velocity to end-effector frame velocity transform)
+        self.ADeTc = np.zeros((6, 6))
         self.ADeTc[0:3, 0:3] = self.eTc.R
         self.ADeTc[3:6, 3:6] = self.eTc.R
-        self.ADeTc[0:3, 3:6] = np.multiply(np.array([self.eTc.t]).T, self.eTc.R)
-        self.ADcTe = np.linalg.inv(self.ADeTc)  # opposite adjoint transformation
+        etc_x = np.array([               # skew symmetric matrix of translation (eTc.t)
+            [0, (-1 * self.eTc.t[2]), self.eTc.t[1]],
+            [self.eTc.t[2], 0, (-1 * self.eTc.t[0])],
+            [(-1 * self.eTc.t[1]), self.eTc.t[0], 0]
+        ])
+        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc.R
+        # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
+
+        # adjoint transformation cVe - transforms velocity from camera to end effector frame
+        # this seems worng - refer paper for more details (ISSUE)
+        """
+        self.cVe = np.zeros((6,6))
+        self.cVe[0:3, 0:3] = self.cTe.R
+        self.cVe[3:6, 3:6] = self.cTe.R
+        cte_x = np.array([               # skew symmetric matrix of translation (cTe.t)
+            [0, (-1 * self.cTe.t[2]), self.cTe.t[1]],
+            [self.cTe.t[2], 0, (-1 * self.cTe.t[0])],
+            [(-1 * self.cTe.t[1]), self.cTe.t[0], 0]
+        ])
+        self.cVe[0:3, 3:6] = cte_x @ self.cTe.R
+        """
 
         # robot arm controllers
         self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 300.0, 120.0, 179.65, 0.69, 67.63]
-        self.dt = 0.6   # parameter for velocity integration
+        self.dt = 1.0   # parameter for velocity integration
 
         # PID control (TODO: tune this)
         self.KPX = 5*(0.0001)
@@ -143,7 +173,7 @@ class PBVS_aruco(Node):
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
             self.arucoPose = sm.SE3(msg.position.x, msg.position.y, msg.position.z)
-            self.arucoPose.t *= 1000        # to mm
+            # self.arucoPose.t *= 1000        # to mm
             quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
             self.arucoPose.R = quat.R
         else:
@@ -160,65 +190,87 @@ class PBVS_aruco(Node):
         return pix_vel
 
     def computeCamVel(self):
-        # compute pixel velocity
-        top_left_pix_vel = self.computePixelPointVel(self.tar_top_left, self.cur_top_left)
-        top_right_pix_vel = self.computePixelPointVel(self.tar_top_right, self.cur_top_right)
-        bottom_right_pix_vel = self.computePixelPointVel(self.tar_bottom_right, self.cur_bottom_right)
-        bottom_left_pix_vel = self.computePixelPointVel(self.tar_bottom_left, self.cur_bottom_left)
-        # flatten pixel velocities (here - 8x1 vector)
-        self.pixelVel = np.array([top_left_pix_vel.flatten(), top_right_pix_vel.flatten(), bottom_right_pix_vel.flatten(), bottom_left_pix_vel.flatten()])
-        self.pixelVel = np.array([self.pixelVel.flatten()]).T     # [[u1_dot], [v1_dot], [u2_dot], [v2_dot], [u3_dot], [v3_dot], [u4_dot], [v4_dot]] - 8x1
+        """
+        Function to compute camera veloctiy Vc from current arucoPose to desired pose.
+        This method is uses PBVS approach.
+        
+        returns: camVel
+        """
 
-        # compute jacobian matrix (combain all for points interation matrix)
-        top_left_jacob = self.computeImgPointJacobian(self.cur_top_left[0], self.cur_top_left[1])
-        top_right_jacob = self.computeImgPointJacobian(self.cur_top_right[0], self.cur_top_right[1])
-        bottom_right_jacob = self.computeImgPointJacobian(self.cur_bottom_right[0], self.cur_bottom_right[1])
-        bottom_left_jacob = self.computeImgPointJacobian(self.cur_bottom_left[0], self.cur_bottom_left[1])
-        # points jacobian (for all for points) - 8x6 matrix
-        pointsJacob = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
+        camVel = np.zeros((6,1))
+        # camVel[0:3, :] -> translation camera velocity (Vc)
+        # camVel[3:6, :] -> rotation camera velocity (Wc) 
 
-        # compute camVel 
-        # camVel = inv(pointsJacobian) @ pixelVel
-        camVel = np.linalg.pinv(pointsJacob) @ self.pixelVel        # (6x1) = (6x8) @ (8x1)
-        # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
+        # current camera to object transform (cTo)
+        cTo = self.arucoPose
+        cTo_t = np.array([cTo.t]).T
+        cto_x = np.array([               # skew symmetric matrix of translation (cTo.t)
+            [0, (-1 * cTo.t[2]), cTo.t[1]],
+            [cTo.t[2], 0, (-1 * cTo.t[0])],
+            [(-1 * cTo.t[1]), cTo.t[0], 0]
+        ])
+        cTo_thetaU = Rotation.from_matrix(cTo.R).as_rotvec().reshape(3,1)        # aixs rotation vector
 
-        return camVel.flatten()
+        # desired camera to object transform (dcTo)
+        dcTo = sm.SE3(0, 0,  0.3)                       # desired trasform should be 30cm above the aruco board
+        dcTo_t = np.array([dcTo.t]).T
+
+        # compute velocity
+        Vc = -1 * self.lambdaVar * ((dcTo_t - cTo_t) + (cto_x @ cTo_thetaU))
+        Wc = -1 * self.lambdaVar * cTo_thetaU
+
+        camVel[0:3, :] = Vc
+        camVel[3:6, :] = Wc
+
+        return camVel       # 6x1
     
     def computeEEVel(self):
-        # check aruco corners detection
+        # check aruco pose detection
         if (self.arucoPose is not None):
+            # compute camera velocity
+            camVel = self.computeCamVel()
+
+            # camera velocity to end effector velocity
+            # using adjoint transformation (Ad_eTc)
+            self.ee_vel = (self.ADeTc @ camVel).flatten()           # (6,)
+            self.ee_vel[3:6] = [0.0, 0.0, 0.0]                      # comment to use angular velocities
+            # print(np.round(camVel[3:].flatten(), 4))
+            # print(np.round(self.ee_vel[3:], 4))
+            # print()
+            self.ee_vel[3] *= -1
+            self.ee_vel[5] *= -1
+
+
+            # log ee_vel
+            self.writer.writerow(self.ee_vel)
+
+
+            """
             # current pose of end effector
             curEEPose = np.array(self.bot.read_current_cartesian_pose())    # [x, y, z, w, p, r]
-            
             # compute transform bTe
             bTe = sm.SE3(curEEPose[0], curEEPose[1], curEEPose[2])
             rot = Rotation.from_euler('xyz', [curEEPose[3], curEEPose[4], curEEPose[5]], degrees=True)
             rotm = rot.as_matrix()
             bTe.R = rotm
-            
             # compute transform bTc
             bTc = bTe @ self.eTc
             trans = bTc.t
             euls = Rotation.from_matrix(bTc.R).as_euler('zyx', degrees=True)     # [w, p, r]
             curCamPose = np.array([trans[0], trans[1], trans[2], euls[0], euls[1], euls[2]])    # [x, y, z, w, p, r]
-            
             # print(Rotation.from_matrix(bTe.R).as_euler('xyz', degrees=True))
             # print(bTc)
-
             # compute transfrom cTo
             cTo = self.arucoPose
-
             # NOTE: the above is in camera frame
             # compute transform bTo
             bTo = bTc @ cTo
             # 30cm above the aruco detection
             bTo.t[2] += 300.0
-
             # current aruco board pose array (from base brame)
             trans = bTo.t
             euls = Rotation.from_matrix(bTo.R).as_euler('zyx', degrees=True)     # [w, p, r]
             curArucoPose = np.array([trans[0], trans[1], trans[2], euls[0], euls[1], euls[2]])    # [x, y, z, w, p, r]
-
             # compute position error
             position_error = np.subtract(curArucoPose, curCamPose)       # [[d_x, d_y, d_z, d_r, d_p, d_w]]
             # adding proportional to position error to get velocity
@@ -227,7 +279,6 @@ class PBVS_aruco(Node):
             # temp_ee_vel[0] *= -1
             # temp_ee_vel[0], temp_ee_vel[1] = temp_ee_vel[1], temp_ee_vel[0]
             # print(np.round(temp_ee_vel, 4))
-
             # for now - lets servo only on x, y, and z
             self.ee_vel[0] = temp_ee_vel[0]
             self.ee_vel[1] = temp_ee_vel[1]
@@ -235,7 +286,6 @@ class PBVS_aruco(Node):
             self.ee_vel[3] = temp_ee_vel[3]
             self.ee_vel[4] = temp_ee_vel[4]
             self.ee_vel[5] = temp_ee_vel[5]
-
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
             # self.vel_error = temp_ee_vel
             # self.ee_vel[0] = (self.vel_error[0] * self.KPX) + (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
@@ -244,6 +294,7 @@ class PBVS_aruco(Node):
             # self.ee_vel[0] *= -1    # invert x-axis
             # self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
             # self.prevCamVel = self.curCamVel.copy()
+            """
         else:
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -278,9 +329,7 @@ class PBVS_aruco(Node):
             tf.header.stamp = self.get_clock().now().to_msg()
             tf.header.frame_id = 'camera_link'
             tf.child_frame_id = "aruco"
-            
-            trans = self.arucoPose.t
-            trans /= 1000.0
+
             tf.transform.translation.x = self.arucoPose.t[0]
             tf.transform.translation.y = self.arucoPose.t[1]
             tf.transform.translation.z = self.arucoPose.t[2] - 0.3        # NOTE: this may be wrong
@@ -298,13 +347,13 @@ class PBVS_aruco(Node):
         if (self.triggered):
             # compute EE velocity
             self.computeEEVel()
-            # self.get_logger().info(f"EE Vel: {self.ee_vel}")
+            # self.get_logger().info(f"EE Vel: {np.round(self.ee_vel, 4)}")
 
             # publish camera to object tfs to visualize
-            self.TF_publisher()
+            # self.TF_publisher()       # depreicated - now this is done in aruco board detection itself
 
             # velocity filter (TODO: Kalman filter instead on moving average)
-            # self.ee_vel = self.maVelFilter(self.ee_vel)
+            self.ee_vel = self.maVelFilter(self.ee_vel)
             print(np.round(self.ee_vel, 4))
 
             # read the current cartesion position
@@ -315,7 +364,7 @@ class PBVS_aruco(Node):
             rad_arr[2] = rad_arr[2] + rad_arr[1]
 
             # ee velocity to joint velocity
-            current_jacobian = self.fanuc_model.jacob0(q=np.array(rad_arr))             # 6x6 matrix
+            current_jacobian = self.fanuc_model.jacobe(q=np.array(rad_arr))             # 6x6 matrix
             joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.ee_vel]).T)  # 6x6 @ 6x1 => 6x1
             joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
             # (i guess) - joint_vels are in rad/sec
@@ -334,6 +383,7 @@ class PBVS_aruco(Node):
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
             joint_vels[1] *= -1
+            joint_vels[3] = 0.0
 
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             

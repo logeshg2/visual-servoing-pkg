@@ -26,7 +26,11 @@ class PBVS_aruco(Node):
 
         # degub tools (logging)
         fp = open("/home/logesh/Desktop/ee_vel.csv", "w")
+        fp1 = open("/home/logesh/Desktop/cam_vel.csv", "w")
+        fp2 = open("/home/logesh/Desktop/aruco_pose.csv", "w")
         self.writer = csv.writer(fp)
+        self.writer1 = csv.writer(fp1)
+        self.writer2 = csv.writer(fp2)
 
         # aruco variables
         self.cur_top_left = None
@@ -241,9 +245,13 @@ class PBVS_aruco(Node):
             self.ee_vel[5] *= -1
 
 
-            # log ee_vel
+            # log ee_vel and camvel
             self.writer.writerow(self.ee_vel)
-
+            self.writer1.writerow(camVel.flatten())
+            temp = []
+            temp.extend(self.arucoPose.t.flatten().tolist())
+            temp.extend(Rotation.from_matrix(self.arucoPose.R).as_quat().flatten().tolist())
+            self.writer2.writerow(temp)
 
             """
             # current pose of end effector

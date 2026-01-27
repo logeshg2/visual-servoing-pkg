@@ -24,7 +24,7 @@ class ArucoNode(Node):
     def __init__(self):
         super().__init__("aruco_node")
 
-        self.declare_parameter('camera_id', 0)
+        self.declare_parameter('camera_id', 2)
         self.declare_parameter('frame_width', 640.0)
         self.declare_parameter('frame_height', 480.0)
         self.cam_dev_id = self.get_parameter('camera_id').get_parameter_value().integer_value
@@ -151,7 +151,7 @@ class ArucoNode(Node):
         cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0] + 100, self.frame_center[1]], (0,0,255), 2)     # X
         cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0], self.frame_center[1] + 100], (0,255,0), 2)     # Y
 
-
+        """
         # mark the target aruco point in the image frame
         cv2.circle(self.latest_image, self.tar_top_left, radius=3, thickness=-1, color=(0, 0, 255))
         cv2.circle(self.latest_image, self.tar_top_right, radius=3, thickness=-1, color=(0, 0, 255))
@@ -163,6 +163,7 @@ class ArucoNode(Node):
         cx = p1[0] + (p3[0] - p1[0]) // 2
         cy = p1[1] + (p3[1] - p1[1]) // 2
         cv2.circle(self.latest_image, [cx, cy], radius=4, thickness=-1, color=(0, 255, 255))
+        """
         # boundaries
         # cv2.line(self.latest_image, self.tar_top_left, self.tar_top_right, (230, 216, 173), 2)
         # cv2.line(self.latest_image, self.tar_top_right, self.tar_bottom_right, (230, 216, 173), 2)

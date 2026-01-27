@@ -10,6 +10,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
+from geometry_msgs.msg import Pose
 from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
@@ -31,9 +32,26 @@ class IBVS_aruco(Node):
         self.tar_top_right = np.array([376, 259])
         self.tar_bottom_right = np.array([265, 265])
         self.tar_bottom_left = np.array([259, 155])
+        self.tar_Z = 0.4        # 40 cm above the board
+        # aruco pose variable
+        self.arucoPose = None
+        # aruco object points
+        self.markerLength = 0.1
+        self.object_points = np.array([
+            [-self.markerLength / 2, -self.markerLength / 2, 0],
+            [self.markerLength / 2, -self.markerLength / 2, 0],
+            [self.markerLength / 2, self.markerLength / 2, 0],
+            [-self.markerLength / 2, self.markerLength / 2, 0]
+        ])
+        # aruco corners depth in camera frame
+        self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])   # [topLeft, topRight, bottomRight, bottomLeft]
+        # aruco desired points jacobian or interation matrix (8x6)
+        self.desiredIntMat = np.array([])
+        self.computeDesiredInteractionMat()
 
         # image jacobian | velocity variables
-        self.pixelVel_gain = 0.02
+        self.pixelVel_gain = 0.02              # previous name from Peter Corke Literature - now depreciated in this script
+        self.lambdaVar =    0.1                # exponential decay factor (Lambda)
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -42,12 +60,15 @@ class IBVS_aruco(Node):
         # camera intrinsic properties
         cameraParam_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
         self.K = pickle.load(cameraParam_fp)
+        self.K[0, 2] = 320.0            # calibration is little off
+        self.K[1, 2] = 240.0
         self.Kinv = np.linalg.inv(self.K)
         self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
         # camera extrinsic properties
         camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")
         camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
         self.camTrans = pickle.load(camTrans_fp)
+        self.camTrans /= 1000           # mm to m
         self.camRotm = pickle.load(camRotm_fp)
 
         # link 6 (or end-effector) to camera transform
@@ -56,18 +77,41 @@ class IBVS_aruco(Node):
         self.eTc = sm.SE3()
         self.eTc.t = self.camTrans
         self.eTc.R = self.camRotm
-        self.ADeTc = np.zeros((6, 6))           # adjoint transformation
+        # camera to end-effector transform (cTe)
+        self.cTe = self.eTc.inv()
+
+        # adjoint transformation (camera frame velocity to end-effector frame velocity transform)
+        self.ADeTc = np.zeros((6, 6))
         self.ADeTc[0:3, 0:3] = self.eTc.R
         self.ADeTc[3:6, 3:6] = self.eTc.R
-        self.ADeTc[0:3, 3:6] = np.multiply(np.array([self.eTc.t]).T, self.eTc.R)
-        self.ADcTe = np.linalg.inv(self.ADeTc)  # opposite adjoint transformation
+        etc_x = np.array([               # skew symmetric matrix of translation (eTc.t)
+            [0, (-1 * self.eTc.t[2]), self.eTc.t[1]],
+            [self.eTc.t[2], 0, (-1 * self.eTc.t[0])],
+            [(-1 * self.eTc.t[1]), self.eTc.t[0], 0]
+        ])
+        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc.R
+        # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
+
+        # adjoint transformation cVe - transforms velocity from camera to end effector frame
+        # this seems worng - refer paper for more details (ISSUE)
+        """
+        self.cVe = np.zeros((6,6))
+        self.cVe[0:3, 0:3] = self.cTe.R
+        self.cVe[3:6, 3:6] = self.cTe.R
+        cte_x = np.array([               # skew symmetric matrix of translation (cTe.t)
+            [0, (-1 * self.cTe.t[2]), self.cTe.t[1]],
+            [self.cTe.t[2], 0, (-1 * self.cTe.t[0])],
+            [(-1 * self.cTe.t[1]), self.cTe.t[0], 0]
+        ])
+        self.cVe[0:3, 3:6] = cte_x @ self.cTe.R
+        """
 
         # robot arm controllers
         self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
-        self.dt = 0.5   # parameter for velocity integration
+        self.dt = 1.0   # parameter for velocity integration
 
         # PID control (TODO: tune this)
         self.KPX = 2*(0.0001)
@@ -96,6 +140,7 @@ class IBVS_aruco(Node):
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
         self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
+        self.pose_sub = self.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
         self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
 
 
@@ -115,9 +160,30 @@ class IBVS_aruco(Node):
         response.message = "trigger successful"
         return response
 
-    def computeImgPointJacobian(self, u, v, Z = 0.3):
+    def computeDesiredInteractionMat(self):
         """
-        Function 'computeImgPointJacobian' is used to compute image jacobian or interaction matrix (J) of the given pixel point (u, v).
+        Function to compute desired aruco corner points interaction matrix
+        This matrix computed will be used for `Approximation of Interaction Matrix`.
+        """
+
+        # desire aruco points (corners) interaction matrix
+        p1_jac = self.computeInteractionMatrix(self.tar_top_left[0], self.tar_top_left[1], self.tar_Z)
+        p2_jac = self.computeInteractionMatrix(self.tar_top_right[0], self.tar_top_right[1], self.tar_Z)
+        p3_jac = self.computeInteractionMatrix(self.tar_bottom_right[0], self.tar_bottom_right[1], self.tar_Z)
+        p4_jac = self.computeInteractionMatrix(self.tar_bottom_left[0], self.tar_bottom_left[1], self.tar_Z)
+        # points jacobian (for all for points) - 8x6 matrix
+        # desired points interaction matrix
+        self.desiredIntMat = np.vstack([p1_jac, p2_jac, p3_jac, p4_jac])
+
+    def computeInteractionMatrix(self, u, v, Z):
+        """
+        Function 'computeInteractionMatrix' is used to compute image jacobian (J) or interaction matrix (L) of the given pixel point (u, v).
+        
+        Args:
+            - u : in pixel
+            - v : in pixel
+            - Z : in meters (depth of point in camera frame)
+        
         """
         # compute image coordinates (x, y) from (u, v)
         # x = (u - self.cx) / self.fx
@@ -126,7 +192,7 @@ class IBVS_aruco(Node):
         xy = self.Kinv @ point
         x = xy[0, 0]
         y = xy[1, 0]
-        Z = Z      # point (x, y) depth (in world frame)
+        Z = Z
 
         # image jacobian template(or formula) - 2x6
         img_jacobian = self.K[0:2, 0:2] @ np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
@@ -147,36 +213,76 @@ class IBVS_aruco(Node):
             self.cur_bottom_left = None
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    def computePixelPointVel(self, des_point, cur_point):
+    def pose_sub_cb(self, msg):
+        if (msg.position is not None and msg.position.x != -1.0):
+            # pose extraction
+            self.arucoPose = sm.SE3(msg.position.x, msg.position.y, msg.position.z)
+            # self.arucoPose.t *= 1000        # to mm
+            quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
+            self.arucoPose.R = quat.R
+        else:
+            self.arucoPose = None
+            self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    def computeImgPointVel(self, des_point, cur_point):
         """
-        function to compute pixel velocity between two points.
-        function use `self.pixelVel_gain` to adjust the velocity scale.
+        function to compute image pixel (i.e., change in image place) velocity between two points.
+        from 'Visual Servo Control Part I: Basic Approaches' literature -> error = current - desired 
         """
 
-        pix_vel = self.pixelVel_gain * (np.subtract(np.array(des_point), np.array(cur_point)))
+        desPoint = np.array([des_point[0], des_point[1], 1]).reshape(3, 1)
+        curPoint = np.array([cur_point[0], cur_point[1], 1]).reshape(3, 1)
+        des_xy = self.Kinv @ desPoint
+        cur_xy = self.Kinv @ curPoint
+        
+        des_xy = des_xy.flatten()[:2]
+        cur_xy = cur_xy.flatten()[:2]
+
+        pix_vel = np.subtract(np.array(cur_xy), np.array(des_xy))           # difference of points in image plane
         return pix_vel
 
+    def computeCornerDepth(self):
+        """ Function to compute depth (Z) from camera frame to the corners (in aruco case) """
+        
+        # depth of the corners are determined using object points
+        for idx, pt in enumerate(self.object_points):
+            cTa = self.arucoPose.A              # camera to aruco pose
+            aTp = np.eye(4)                     # aruco to corner point pose
+            aTp[0:3, 3] = pt
+            cTp = cTa @ aTp                     # camera to corner point pose
+            # store depth (in camera frame)
+            self.cornerDepth[idx] = cTp[2, 3]   # depth (Z value)   
+
     def computeCamVel(self):
+        # compute depth corners
+        self.computeCornerDepth()
+        # populated - `self.cornerDepth` array - [topLeft, topRight, bottomRight, bottomLeft]
+
         # compute pixel velocity
-        top_left_pix_vel = self.computePixelPointVel(self.tar_top_left, self.cur_top_left)
-        top_right_pix_vel = self.computePixelPointVel(self.tar_top_right, self.cur_top_right)
-        bottom_right_pix_vel = self.computePixelPointVel(self.tar_bottom_right, self.cur_bottom_right)
-        bottom_left_pix_vel = self.computePixelPointVel(self.tar_bottom_left, self.cur_bottom_left)
+        top_left_pix_vel = self.computeImgPointVel(self.tar_top_left, self.cur_top_left)
+        top_right_pix_vel = self.computeImgPointVel(self.tar_top_right, self.cur_top_right)
+        bottom_right_pix_vel = self.computeImgPointVel(self.tar_bottom_right, self.cur_bottom_right)
+        bottom_left_pix_vel = self.computeImgPointVel(self.tar_bottom_left, self.cur_bottom_left)
         # flatten pixel velocities (here - 8x1 vector)
         self.pixelVel = np.array([top_left_pix_vel.flatten(), top_right_pix_vel.flatten(), bottom_right_pix_vel.flatten(), bottom_left_pix_vel.flatten()])
         self.pixelVel = np.array([self.pixelVel.flatten()]).T     # [[u1_dot], [v1_dot], [u2_dot], [v2_dot], [u3_dot], [v3_dot], [u4_dot], [v4_dot]] - 8x1
 
-        # compute jacobian matrix (combain all for points interation matrix)
-        top_left_jacob = self.computeImgPointJacobian(self.cur_top_left[0], self.cur_top_left[1])
-        top_right_jacob = self.computeImgPointJacobian(self.cur_top_right[0], self.cur_top_right[1])
-        bottom_right_jacob = self.computeImgPointJacobian(self.cur_bottom_right[0], self.cur_bottom_right[1])
-        bottom_left_jacob = self.computeImgPointJacobian(self.cur_bottom_left[0], self.cur_bottom_left[1])
+        # compute interation matrix (combain all for points interation matrix)
+        top_left_jacob = self.computeInteractionMatrix(self.cur_top_left[0], self.cur_top_left[1], self.cornerDepth[0])
+        top_right_jacob = self.computeInteractionMatrix(self.cur_top_right[0], self.cur_top_right[1], self.cornerDepth[1])
+        bottom_right_jacob = self.computeInteractionMatrix(self.cur_bottom_right[0], self.cur_bottom_right[1], self.cornerDepth[2])
+        bottom_left_jacob = self.computeInteractionMatrix(self.cur_bottom_left[0], self.cur_bottom_left[1], self.cornerDepth[3])
         # points jacobian (for all for points) - 8x6 matrix
+        # current points jacobian
         pointsJacob = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
 
+        # [IMP]
+        # Approximation of Interaction Matrix   (8x6)
+        approxIntMat = np.sum(pointsJacob, self.desiredIntMat) / 2
+
         # compute camVel 
-        # camVel = inv(pointsJacobian) @ pixelVel
-        camVel = np.linalg.pinv(pointsJacob) @ self.pixelVel        # (6x1) = (6x8) @ (8x1)
+        # camVel = inv(approxIntMat) @ pixelVel
+        camVel = np.linalg.pinv(approxIntMat) @ self.pixelVel        # (6x1) = (6x8) @ (8x1)
         # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
 
         return camVel.flatten()
@@ -189,9 +295,21 @@ class IBVS_aruco(Node):
             # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
 
             # camera velocity to end effector velocity
-            temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
-            # print(np.round(temp_ee_vel, 4))
+            # using adjoint transformation (Ad_eTc)
+            self.ee_vel = (self.ADeTc @ self.curCamVel).flatten()       # (6,)
+            # self.ee_vel[3:6] = [0.0, 0.0, 0.0]                        # comment to use angular velocities
+            # print(np.round(camVel[3:].flatten(), 4))
+            # print(np.round(self.ee_vel[3:], 4))
+            # print()
+            self.ee_vel[3] *= -1
+            self.ee_vel[4] *= -1
+            self.ee_vel[5] *= -1
 
+
+            """
+            # camera velocity to end effector velocity
+            temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
+            # print(np.round(temp_ee_vel, 4)
             # for now - lets servo only on x, y, and z (or 3D servoing)
             self.ee_vel[0] = temp_ee_vel[0]
             self.ee_vel[1] = temp_ee_vel[1]
@@ -199,7 +317,6 @@ class IBVS_aruco(Node):
             # self.ee_vel[3] = temp_ee_vel[3]
             # self.ee_vel[4] = temp_ee_vel[4]
             # self.ee_vel[5] = temp_ee_vel[5]
-
             # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
             # self.vel_error = temp_ee_vel
             # self.ee_vel[0] = (self.vel_error[0] * self.KPX) + (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
@@ -207,8 +324,8 @@ class IBVS_aruco(Node):
             # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
             # self.ee_vel[0] *= -1    # invert x-axis
             # self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
-
             self.prevCamVel = self.curCamVel.copy()
+            """
         else:
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -273,6 +390,8 @@ class IBVS_aruco(Node):
             # add that to current joint position
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
+            joint_vels[1] *= -1     # this is due to wrong ee-jacobian (i guess)
+            joint_vels[3] = 0.0
 
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             
@@ -287,12 +406,12 @@ class IBVS_aruco(Node):
 def main():
     rclpy.init()
 
-    # try:
-    node = IBVS_aruco()
-    rclpy.spin(node)
-    # except Exception as e:
-        # print(f"Shutting down IBVS node:\nException: {e}")
-        # node.destroy_node()
+    try:
+        node = IBVS_aruco()
+        rclpy.spin(node)
+    except Exception as e:
+        print(f"Shutting down IBVS node:\nException: {e}")
+        node.destroy_node()
         # rclpy.shutdown()
 
 if __name__ == "__main__":

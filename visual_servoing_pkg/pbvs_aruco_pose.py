@@ -56,6 +56,8 @@ class PBVS_aruco(Node):
         # camera intrinsic properties
         cameraParam_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
         self.K = pickle.load(cameraParam_fp)
+        self.K[0, 2] = 320.0            # calibration is little off
+        self.K[1, 2] = 240.0
         self.Kinv = np.linalg.inv(self.K)
         self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
         # camera extrinsic properties
@@ -392,8 +394,9 @@ class PBVS_aruco(Node):
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
             joint_vels[1] *= -1
-            # joint_vels[3] = 0.0
+            joint_vels[3] = 0.0
 
+            # compute target joint position from joint velocities
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             
             # adding coupling - J[3]' = J[3] - J[2]

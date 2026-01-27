@@ -47,7 +47,7 @@ class PBVS_aruco(Node):
 
         # image jacobian | velocity variables
         self.pixelVel_gain = 0.02
-        self.lambdaVar =    0.1                # exponential decay factor (Lambda)
+        self.lambdaVar =    0.3                # exponential decay factor (Lambda)
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -237,11 +237,12 @@ class PBVS_aruco(Node):
             # camera velocity to end effector velocity
             # using adjoint transformation (Ad_eTc)
             self.ee_vel = (self.ADeTc @ camVel).flatten()           # (6,)
-            self.ee_vel[3:6] = [0.0, 0.0, 0.0]                      # comment to use angular velocities
+            # self.ee_vel[3:6] = [0.0, 0.0, 0.0]                      # comment to use angular velocities
             # print(np.round(camVel[3:].flatten(), 4))
             # print(np.round(self.ee_vel[3:], 4))
             # print()
             self.ee_vel[3] *= -1
+            self.ee_vel[4] *= -1
             self.ee_vel[5] *= -1
 
 
@@ -391,7 +392,7 @@ class PBVS_aruco(Node):
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
             joint_vels[1] *= -1
-            joint_vels[3] = 0.0
+            # joint_vels[3] = 0.0
 
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             

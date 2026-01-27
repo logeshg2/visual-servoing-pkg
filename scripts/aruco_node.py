@@ -184,7 +184,7 @@ class ArucoNode(Node):
         self.process_image()
 
         # draw target markers
-        # self.plotTargetMarkers()        
+        self.plotTargetMarkers()        
 
         # publish aruco center and aruco corners array
         if (self.aruco_center is not None and self.corner is not None):
@@ -212,13 +212,21 @@ class ArucoNode(Node):
                 msg.orientation.z = self.aruco_pose['quat'][2]
                 msg.orientation.w = self.aruco_pose['quat'][3]
                 self.aruco_pose_pub.publish(msg)
-
+            
                 # aruco TF (with respect to camera_link)
                 self.TF_publisher(self.aruco_pose['tvec'], self.aruco_pose['quat'])
+            else:
+                msg = Pose()
+                msg.position.x = -1.0
+                self.aruco_pose_pub.publish(msg)
         else:
             corner_msg = ArucoCorner()
             corner_msg.top_left = np.array([-1, -1])
             self.corner_pub.publish(corner_msg)
+
+            msg = Pose()
+            msg.position.x = -1.0
+            self.aruco_pose_pub.publish(msg)
 
         # publish processed image
         msg = Image()

@@ -24,7 +24,7 @@ class ArucoNode(Node):
     def __init__(self):
         super().__init__("aruco_node")
 
-        self.declare_parameter('camera_id', 2)
+        self.declare_parameter('camera_id', 0)
         self.declare_parameter('frame_width', 640.0)
         self.declare_parameter('frame_height', 480.0)
         self.cam_dev_id = self.get_parameter('camera_id').get_parameter_value().integer_value
@@ -77,6 +77,23 @@ class ArucoNode(Node):
         self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
         self.img_processer_timer = self.create_timer(1/20, self.image_pub_timer, callback_group=self.img_group)
 
+
+    def plotCornersDepth(self, trans, rvec, objecPoints):
+        # tryping to plot depth and thier frame axis of the corners
+        # camera to aruco transform (cTa)
+        cTa = np.eye(4)
+        cTa[0:3, 3] = trans
+        cTa[0:3, 0:3] = Rotation.from_rotvec(rvec).as_matrix()
+        pt1, pt2, pt3, pt4 = objecPoints
+
+        for pt in objecPoints:
+            aTp = np.eye(4)
+            aTp[0:3, 3] = pt
+            cTp = cTa @ aTp
+            rvec_temp = Rotation.from_matrix(cTp[0:3, 0:3]).as_rotvec()
+            tvec_temp = np.array(cTp[0:3, 3])
+            cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec_temp, tvec_temp, 0.01, 3)
+
     def process_image(self):
         gray_img = cv2.cvtColor(self.latest_image, cv2.COLOR_BGR2GRAY)
         # Detect the markers
@@ -116,6 +133,8 @@ class ArucoNode(Node):
                 tvec = tvec.flatten()
                 quat = Rotation.from_rotvec(rvec).as_quat()
                 self.aruco_pose = {'tvec': tvec, 'quat': quat}
+                # plot corners frame (testing for ibvs) - for Z value of corner points
+                # self.plotCornersDepth(tvec, rvec, object_points)
             else:
                 self.aruco_pose = None
         else:

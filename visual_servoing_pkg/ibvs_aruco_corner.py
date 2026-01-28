@@ -50,7 +50,7 @@ class IBVS_aruco(Node):
 
         # image jacobian | velocity variables
         self.pixelVel_gain = 0.02              # previous name from Peter Corke Literature - now depreciated in this script
-        self.lambdaVar =  0.4                # exponential decay factor (Lambda)
+        self.lambdaVar =  0.4                  # exponential decay factor (Lambda)
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -202,6 +202,36 @@ class IBVS_aruco(Node):
         
         return img_jacobian
 
+    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0):
+        """
+        Function to compute adaptive gain based on the error vector and other paramters
+        This approach was inspired from `ViSP team`.
+        Args:
+            - lam_0 : float, gain value at error = 0    (i.e., where error is small)
+            - lam_inf : float, gain value at error = infinity (i.e., where error is very large)
+            - lam_s0 : float, gain at slope in 0 (i.e., idk)
+        
+        - e_vec : np.ndarray(), dtype=float64, error vector
+        """
+        
+        # parameters
+        a = lam_0 - lam_inf
+        b = lam_s0 / a
+        c = lam_inf
+        
+        # compute infinite norm of error vector (i.e., getting abs max of error vector)
+        x_norm = 0.0
+        for err in self.pixelVel:
+            abs_err = abs(err[0])
+            if (abs_err > x_norm):
+                x_norm = abs_err 
+
+        # adaptive gain (lam_adapt)
+        lam_adapt = (a * np.exp(-1 * b * x_norm)) + c
+
+        # set adaptive gain to `self.lambdaVar`
+        self.lambdaVar = lam_adapt
+
     def corners_sub_cb(self, msg):
         if (msg.top_left is not None):
             self.cur_top_left = msg.top_left
@@ -282,9 +312,15 @@ class IBVS_aruco(Node):
         # Approximation of Interaction Matrix   (8x6)
         approxIntMat = (pointsJacob + self.desiredIntMat) / 2
 
+        # Adaptive gain (lambda_adapt)
+        self.setAdaptiveGain(1.666, 0.666, 1.666)           # default - [1.666, 0.666, 1.666] 
+        # tuning adaptive gain parameter using constant lambda
+        # self.lambdaVar = 1.0                              # uncomment and tune lambda 0, and inf
+
         # compute camVel 
         # camVel = -1 * self.lambdaVar * (inv(approxIntMat) @ pixelVel)
         camVel = -1 * self.lambdaVar * (np.linalg.pinv(approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
+        # NOTE: self.lambdaVar is negative for Eye in Hand, and positive for Eye to Hand
         # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
         
         # print(np.round(camVel.flatten(), 4))
@@ -402,6 +438,12 @@ class IBVS_aruco(Node):
             # adding coupling - J[3]' = J[3] - J[2]
             target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
             target_joint_pose = np.rad2deg(target_rad_arr).tolist()
+
+            # TODO: PD controller for target joint pose
+            """
+            # PD control on target joint pose
+            pose_diff = np.subtract(target_joint_pose - cur_joint_pose)
+            """
 
             # write register and sync-movement
             # self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")

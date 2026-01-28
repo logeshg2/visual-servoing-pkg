@@ -153,10 +153,10 @@ class IBVS_aruco(Node):
             self.triggered = False
         
         # go to tracking position
-        self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
-        time.sleep(2)
-        while (self.bot.is_moving()):
-            time.sleep(0.1)
+        # self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
+        # time.sleep(2)
+        # while (self.bot.is_moving()):
+        #     time.sleep(0.1)
 
         response.success = True
         response.message = "trigger successful"
@@ -313,9 +313,9 @@ class IBVS_aruco(Node):
         approxIntMat = (pointsJacob + self.desiredIntMat) / 2
 
         # Adaptive gain (lambda_adapt)
-        self.setAdaptiveGain(1.666, 0.666, 1.666)           # default - [1.666, 0.666, 1.666] 
+        self.setAdaptiveGain(0.5, 0.3, 30.0)           # default - [1.666, 0.666, 1.666] 
         # tuning adaptive gain parameter using constant lambda
-        # self.lambdaVar = 1.0                              # uncomment and tune lambda 0, and inf
+        # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
 
         # compute camVel 
         # camVel = -1 * self.lambdaVar * (inv(approxIntMat) @ pixelVel)

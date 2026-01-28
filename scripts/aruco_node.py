@@ -42,6 +42,8 @@ class ArucoNode(Node):
         K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
         dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef.pkl", "rb")
         self.K = pickle.load(K_fp)
+        self.K[0, 2] = 320.0            # calibration is little off (for fingers camera)
+        self.K[1, 2] = 240.0
         self.camDist = pickle.load(dist_fp)
 
         # logging
@@ -59,10 +61,11 @@ class ArucoNode(Node):
         self.aruco_pose = None
 
         # target aruco points
-        self.tar_top_left = np.array([370, 149])
-        self.tar_top_right = np.array([376, 259])
-        self.tar_bottom_right = np.array([265, 265])
-        self.tar_bottom_left = np.array([259, 155])
+        self.tar_top_left = np.array([171, 92])
+        self.tar_top_right = np.array([462, 91])
+        self.tar_bottom_right = np.array([463, 382])
+        self.tar_bottom_left = np.array([172, 382])
+        self.tar_Z = 0.299
 
         # ros2 communication variables
         self.cvBridge = CvBridge()
@@ -128,7 +131,7 @@ class ArucoNode(Node):
             ], dtype=np.float32)
             _, rvec, tvec = cv2.solvePnP(object_points, np.array(self.corner), self.K, self.camDist, False, flags=cv2.SOLVEPNP_EPNP )
             if (_):
-                cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.1, 3)
+                cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.05, 3)
                 rvec = rvec.flatten()
                 tvec = tvec.flatten()
                 quat = Rotation.from_rotvec(rvec).as_quat()
@@ -151,7 +154,7 @@ class ArucoNode(Node):
         cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0] + 100, self.frame_center[1]], (0,0,255), 2)     # X
         cv2.arrowedLine(self.latest_image, self.frame_center, [self.frame_center[0], self.frame_center[1] + 100], (0,255,0), 2)     # Y
 
-        """
+        
         # mark the target aruco point in the image frame
         cv2.circle(self.latest_image, self.tar_top_left, radius=3, thickness=-1, color=(0, 0, 255))
         cv2.circle(self.latest_image, self.tar_top_right, radius=3, thickness=-1, color=(0, 0, 255))
@@ -163,7 +166,7 @@ class ArucoNode(Node):
         cx = p1[0] + (p3[0] - p1[0]) // 2
         cy = p1[1] + (p3[1] - p1[1]) // 2
         cv2.circle(self.latest_image, [cx, cy], radius=4, thickness=-1, color=(0, 255, 255))
-        """
+        
         # boundaries
         # cv2.line(self.latest_image, self.tar_top_left, self.tar_top_right, (230, 216, 173), 2)
         # cv2.line(self.latest_image, self.tar_top_right, self.tar_bottom_right, (230, 216, 173), 2)

@@ -28,11 +28,11 @@ class IBVS_aruco(Node):
         self.cur_bottom_right = None
         self.cur_bottom_left = None
         # target aruco points
-        self.tar_top_left = np.array([370, 149])
-        self.tar_top_right = np.array([376, 259])
-        self.tar_bottom_right = np.array([265, 265])
-        self.tar_bottom_left = np.array([259, 155])
-        self.tar_Z = 0.4        # 40 cm above the board
+        self.tar_top_left = np.array([171, 92])
+        self.tar_top_right = np.array([462, 91])
+        self.tar_bottom_right = np.array([463, 382])
+        self.tar_bottom_left = np.array([172, 382])
+        self.tar_Z = 0.299        # 30 cm above the board
         # aruco pose variable
         self.arucoPose = None
         # aruco object points
@@ -47,11 +47,10 @@ class IBVS_aruco(Node):
         self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])   # [topLeft, topRight, bottomRight, bottomLeft]
         # aruco desired points jacobian or interation matrix (8x6)
         self.desiredIntMat = np.array([])
-        self.computeDesiredInteractionMat()
 
         # image jacobian | velocity variables
         self.pixelVel_gain = 0.02              # previous name from Peter Corke Literature - now depreciated in this script
-        self.lambdaVar =    0.1                # exponential decay factor (Lambda)
+        self.lambdaVar =  0.4                # exponential decay factor (Lambda)
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -136,6 +135,9 @@ class IBVS_aruco(Node):
         ])
         self.maIdx = 0
 
+        # compute desired interaction matrix - this will be constant
+        self.computeDesiredInteractionMat()
+
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
         self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.vel_gen_group)
@@ -195,8 +197,8 @@ class IBVS_aruco(Node):
         Z = Z
 
         # image jacobian template(or formula) - 2x6
-        img_jacobian = self.K[0:2, 0:2] @ np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
-                                                    [0, (-1/Z), (y/Z), (1+(y*y)), (-x*y), -x]])
+        img_jacobian = np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
+                                [0, (-1/Z), (y/Z), (1+(y*y)), (-x*y), -x]])
         
         return img_jacobian
 
@@ -278,13 +280,15 @@ class IBVS_aruco(Node):
 
         # [IMP]
         # Approximation of Interaction Matrix   (8x6)
-        approxIntMat = np.sum(pointsJacob, self.desiredIntMat) / 2
+        approxIntMat = (pointsJacob + self.desiredIntMat) / 2
 
         # compute camVel 
-        # camVel = inv(approxIntMat) @ pixelVel
-        camVel = np.linalg.pinv(approxIntMat) @ self.pixelVel        # (6x1) = (6x8) @ (8x1)
+        # camVel = -1 * self.lambdaVar * (inv(approxIntMat) @ pixelVel)
+        camVel = -1 * self.lambdaVar * (np.linalg.pinv(approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
         # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
-
+        
+        # print(np.round(camVel.flatten(), 4))
+        
         return camVel.flatten()
     
     def computeEEVel(self):
@@ -301,9 +305,9 @@ class IBVS_aruco(Node):
             # print(np.round(camVel[3:].flatten(), 4))
             # print(np.round(self.ee_vel[3:], 4))
             # print()
-            self.ee_vel[3] *= -1
-            self.ee_vel[4] *= -1
-            self.ee_vel[5] *= -1
+            # self.ee_vel[3] *= -1
+            # self.ee_vel[4] *= -1
+            # self.ee_vel[5] *= -1
 
 
             """

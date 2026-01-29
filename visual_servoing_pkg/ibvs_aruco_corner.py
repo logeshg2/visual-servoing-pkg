@@ -153,10 +153,10 @@ class IBVS_aruco(Node):
             self.triggered = False
         
         # go to tracking position
-        # self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
-        # time.sleep(2)
-        # while (self.bot.is_moving()):
-        #     time.sleep(0.1)
+        self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
+        time.sleep(2)
+        while (self.bot.is_moving()):
+            time.sleep(0.1)
 
         response.success = True
         response.message = "trigger successful"

@@ -3,6 +3,7 @@
 # TODO
 # 1. put target aruco positions in yaml and other constant variables too.
 
+import cv2
 import time
 import pickle
 import numpy as np
@@ -57,19 +58,40 @@ class IBVS_aruco(Node):
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         # camera intrinsic properties
+        """
         cameraParam_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
         self.K = pickle.load(cameraParam_fp)
         self.K[0, 2] = 320.0            # calibration is little off
         self.K[1, 2] = 240.0
+        """
+        # camera intrinsic (realsense)
+        self.K = np.array([
+            [607.0556030273438, 0.0, 328.3836364746094],
+            [0.0, 606.6974487304688, 241.04295349121094],
+            [0.0, 0.0, 1.0]
+        ])
         self.Kinv = np.linalg.inv(self.K)
         self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
+        """
         # camera extrinsic properties
         camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")
         camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
         self.camTrans = pickle.load(camTrans_fp)
         self.camTrans /= 1000           # mm to m
         self.camRotm = pickle.load(camRotm_fp)
+        """
+        camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
+        
+        # camera extrinsic for realsense (eye in hand config)
+        mat = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/eye_in_hand_rs.pkl", "rb"))
+        rvec, _ = cv2.Rodrigues(mat[0:3, 0:3])
+        rot, _ = cv2.Rodrigues(rvec)
+        self.eTc = sm.SE3()
+        self.eTc.t = mat[0:3, 3]
+        self.eTc.R = rot
+        self.cTe = self.eTc.inv()
 
+        """
         # link 6 (or end-effector) to camera transform
         # self.eTc = sm.SE3(0.070, 0.0, 0.120)
         # self.eTc *= sm.SE3().Rz(np.deg2rad(90))
@@ -78,7 +100,8 @@ class IBVS_aruco(Node):
         self.eTc.R = self.camRotm
         # camera to end-effector transform (cTe)
         self.cTe = self.eTc.inv()
-
+        """
+        
         # adjoint transformation (camera frame velocity to end-effector frame velocity transform)
         self.ADeTc = np.zeros((6, 6))
         self.ADeTc[0:3, 0:3] = self.eTc.R
@@ -431,7 +454,7 @@ class IBVS_aruco(Node):
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
             joint_vels[1] *= -1     # this is due to wrong ee-jacobian (i guess)
-            joint_vels[3] = 0.0
+            # joint_vels[3] = 0.0
 
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
             

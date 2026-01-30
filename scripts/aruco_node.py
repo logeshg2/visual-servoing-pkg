@@ -24,7 +24,7 @@ class ArucoNode(Node):
     def __init__(self):
         super().__init__("aruco_node")
 
-        self.declare_parameter('camera_id', 2)
+        self.declare_parameter('camera_id', 6)
         self.declare_parameter('frame_width', 640.0)
         self.declare_parameter('frame_height', 480.0)
         self.cam_dev_id = self.get_parameter('camera_id').get_parameter_value().integer_value

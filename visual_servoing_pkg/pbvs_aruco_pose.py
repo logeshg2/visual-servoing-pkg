@@ -17,7 +17,8 @@ from geometry_msgs.msg import Pose, TransformStamped
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
-from fanuc_vel_controller.fanuc_model import Fanuc, sm
+from fanuc_vel_controller.fanuc_model import sm
+import pinocchio
 
 
 class PBVS_aruco(Node):
@@ -103,11 +104,15 @@ class PBVS_aruco(Node):
         """
 
         # robot arm controllers
-        self.fanuc_model = Fanuc()
         self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 300.0, 120.0, 179.65, 0.69, 67.63]
         self.dt = 1.0   # parameter for velocity integration
+
+        # setup pinocchio
+        self.robotModel = pinocchio.buildModelsFromUrdf("/home/logesh/fanuc_ws/src/fanuc_ros2_drivers/src/fanuc_description/urdf/lrmate200id4s.urdf")[0]
+        self.robotData = pinocchio.createDatas(self.robotModel)
+        self.eeFrameId = self.robotModel.getFrameId("tool0")
 
         # PID control (TODO: tune this)
         self.KPX = 5*(0.0001)
@@ -375,7 +380,7 @@ class PBVS_aruco(Node):
             rad_arr[2] = rad_arr[2] + rad_arr[1]
 
             # ee velocity to joint velocity
-            current_jacobian = self.fanuc_model.jacobe(q=np.array(rad_arr))             # 6x6 matrix
+            current_jacobian = pinocchio.computeFrameJacobian(self.robotModel, self.robotData, np.array(rad_arr), self.eeFrameId)   # 6x6
             joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.ee_vel]).T)  # 6x6 @ 6x1 => 6x1
             joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
             # (i guess) - joint_vels are in rad/sec
@@ -393,7 +398,8 @@ class PBVS_aruco(Node):
             # add that to current joint position
             target_rad_arr = np.add(rad_arr, joint_vels)
             """
-            joint_vels[1] *= -1
+            # NOTE: commenting joint 2 (flip) - fixed using pinocchio pkg
+            # joint_vels[1] *= -1
             joint_vels[3] = 0.0
 
             # compute target joint position from joint velocities

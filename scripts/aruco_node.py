@@ -61,11 +61,11 @@ class ArucoNode(Node):
         self.aruco_pose = None
 
         # target aruco points
-        self.tar_top_left = np.array([171, 92])
-        self.tar_top_right = np.array([462, 91])
-        self.tar_bottom_right = np.array([463, 382])
-        self.tar_bottom_left = np.array([172, 382])
-        self.tar_Z = 0.299
+        self.tar_top_left = np.array([202, 119])
+        self.tar_top_right = np.array([438, 118])
+        self.tar_bottom_right = np.array([439, 355])
+        self.tar_bottom_left = np.array([203, 355])
+        self.tar_Z = 0.372
 
         # ros2 communication variables
         self.cvBridge = CvBridge()

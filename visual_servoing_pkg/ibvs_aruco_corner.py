@@ -1,4 +1,4 @@
-#!/home/logesh/robotic_toolbox_ws/toolbox_env/bin/python3
+#!/usr/bin/env python3
 
 # TODO
 # 1. put target aruco positions in yaml and other constant variables too.
@@ -7,6 +7,7 @@ import cv2
 import time
 import pickle
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 import rclpy
 from rclpy.node import Node
@@ -16,7 +17,7 @@ from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
-from fanuc_vel_controller.fanuc_model import sm
+# from fanuc_vel_controller.fanuc_model import sm
 import pinocchio
 
 
@@ -30,11 +31,11 @@ class IBVS_aruco(Node):
         self.cur_bottom_right = None
         self.cur_bottom_left = None
         # target aruco points
-        self.tar_top_left = np.array([171, 92])
-        self.tar_top_right = np.array([462, 91])
-        self.tar_bottom_right = np.array([463, 382])
-        self.tar_bottom_left = np.array([172, 382])
-        self.tar_Z = 0.299        # 30 cm above the board
+        self.tar_top_left = np.array([202, 119])
+        self.tar_top_right = np.array([438, 118])
+        self.tar_bottom_right = np.array([439, 355])
+        self.tar_bottom_left = np.array([203, 355])
+        self.tar_Z = 0.372        # 30 cm above the board
         # aruco pose variable
         self.arucoPose = None
         # aruco object points
@@ -81,16 +82,15 @@ class IBVS_aruco(Node):
         self.camTrans /= 1000           # mm to m
         self.camRotm = pickle.load(camRotm_fp)
         """
-        camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
         
         # camera extrinsic for realsense (eye in hand config)
         mat = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/eye_in_hand_rs.pkl", "rb"))
         rvec, _ = cv2.Rodrigues(mat[0:3, 0:3])
         rot, _ = cv2.Rodrigues(rvec)
-        self.eTc = sm.SE3()
-        self.eTc.t = mat[0:3, 3]
-        self.eTc.R = rot
-        self.cTe = self.eTc.inv()
+        self.eTc = np.eye(4)
+        self.eTc[0:3, 3] = mat[0:3, 3]
+        self.eTc[0:3, 0:3] = rot
+        self.cTe = np.linalg.pinv(self.eTc)
 
         """
         # link 6 (or end-effector) to camera transform
@@ -105,14 +105,15 @@ class IBVS_aruco(Node):
         
         # adjoint transformation (camera frame velocity to end-effector frame velocity transform)
         self.ADeTc = np.zeros((6, 6))
-        self.ADeTc[0:3, 0:3] = self.eTc.R
-        self.ADeTc[3:6, 3:6] = self.eTc.R
+        self.ADeTc[0:3, 0:3] = self.eTc[0:3, 0:3]
+        self.ADeTc[3:6, 3:6] = self.eTc[0:3, 0:3]
+        eTc_t = self.eTc[0:3, 3]
         etc_x = np.array([               # skew symmetric matrix of translation (eTc.t)
-            [0, (-1 * self.eTc.t[2]), self.eTc.t[1]],
-            [self.eTc.t[2], 0, (-1 * self.eTc.t[0])],
-            [(-1 * self.eTc.t[1]), self.eTc.t[0], 0]
+            [0, (-1 * eTc_t[2]), eTc_t[1]],
+            [eTc_t[2], 0, (-1 * eTc_t[0])],
+            [(-1 * eTc_t[1]), eTc_t[0], 0]
         ])
-        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc.R
+        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc[0:3, 0:3]
         # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
 
         # adjoint transformation cVe - transforms velocity from camera to end effector frame
@@ -137,7 +138,7 @@ class IBVS_aruco(Node):
 
         # setup pinocchio
         self.robotModel = pinocchio.buildModelsFromUrdf("/home/logesh/fanuc_ws/src/fanuc_ros2_drivers/src/fanuc_description/urdf/lrmate200id4s.urdf")[0]
-        self.robotData = pinocchio.createDatas(self.robotModel)
+        self.robotData = pinocchio.createDatas(self.robotModel)[0]
         self.eeFrameId = self.robotModel.getFrameId("tool0")
 
         # PID control (TODO: tune this)
@@ -276,10 +277,12 @@ class IBVS_aruco(Node):
     def pose_sub_cb(self, msg):
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
-            self.arucoPose = sm.SE3(msg.position.x, msg.position.y, msg.position.z)
+            self.arucoPose = np.eye(4)
+            self.arucoPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
             # self.arucoPose.t *= 1000        # to mm
-            quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
-            self.arucoPose.R = quat.R
+            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
+            # quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
+            self.arucoPose[0:3, 0:3] = rotm
         else:
             self.arucoPose = None
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -306,7 +309,7 @@ class IBVS_aruco(Node):
         
         # depth of the corners are determined using object points
         for idx, pt in enumerate(self.object_points):
-            cTa = self.arucoPose.A              # camera to aruco pose
+            cTa = self.arucoPose                # camera to aruco pose
             aTp = np.eye(4)                     # aruco to corner point pose
             aTp[0:3, 3] = pt
             cTp = cTa @ aTp                     # camera to corner point pose

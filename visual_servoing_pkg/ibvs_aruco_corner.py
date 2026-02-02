@@ -73,7 +73,7 @@ class IBVS_aruco(Node):
             [0.0, 0.0, 1.0]
         ])
         self.Kinv = np.linalg.inv(self.K)
-        self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
+        # self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
         """
         # camera extrinsic properties
         camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")

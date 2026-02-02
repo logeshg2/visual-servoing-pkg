@@ -1,8 +1,9 @@
-#!/home/logesh/robotic_toolbox_ws/toolbox_env/bin/python3
+#!/usr/bin/env python3
 
 # TODO
 # 1. put target aruco positions in yaml and other constant variables too.
 
+import cv2
 import csv
 import time
 import pickle
@@ -17,7 +18,7 @@ from geometry_msgs.msg import Pose, TransformStamped
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
-from fanuc_vel_controller.fanuc_model import sm
+# from fanuc_vel_controller.fanuc_model import sm
 import pinocchio
 
 
@@ -26,13 +27,15 @@ class PBVS_aruco(Node):
         super().__init__("pbvs_aruco_node")
 
         # degub tools (logging)
+        """
         fp = open("/home/logesh/Desktop/ee_vel.csv", "w")
         fp1 = open("/home/logesh/Desktop/cam_vel.csv", "w")
         fp2 = open("/home/logesh/Desktop/aruco_pose.csv", "w")
         self.writer = csv.writer(fp)
         self.writer1 = csv.writer(fp1)
         self.writer2 = csv.writer(fp2)
-
+        """
+        
         # aruco variables
         self.cur_top_left = None
         self.cur_top_right = None
@@ -54,20 +57,40 @@ class PBVS_aruco(Node):
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        """
         # camera intrinsic properties
         cameraParam_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
         self.K = pickle.load(cameraParam_fp)
         self.K[0, 2] = 320.0            # calibration is little off
         self.K[1, 2] = 240.0
+        """
+        # camera intrinsic (realsense)
+        self.K = np.array([
+            [607.0556030273438, 0.0, 328.3836364746094],
+            [0.0, 606.6974487304688, 241.04295349121094],
+            [0.0, 0.0, 1.0]
+        ])
         self.Kinv = np.linalg.inv(self.K)
-        self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
+        # self.Z = 2                      # distance from camera to target (assuming it is 1m away) - this is point depth # TODO: need to tune this
+        """
         # camera extrinsic properties
         camTrans_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_trans.pkl", "rb")
         camRotm_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/hand_eye_rotm.pkl", "rb")
         self.camTrans = pickle.load(camTrans_fp)
         self.camTrans /= 1000           # mm to m
         self.camRotm = pickle.load(camRotm_fp)
+        """
 
+        # camera extrinsic for realsense (eye in hand config)
+        mat = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/eye_in_hand_rs.pkl", "rb"))
+        rvec, _ = cv2.Rodrigues(mat[0:3, 0:3])
+        rot, _ = cv2.Rodrigues(rvec)
+        self.eTc = np.eye(4)
+        self.eTc[0:3, 3] = mat[0:3, 3]
+        self.eTc[0:3, 0:3] = rot
+        self.cTe = np.linalg.pinv(self.eTc)
+        
+        """
         # link 6 (or end-effector) to camera transform
         # self.eTc = sm.SE3(0.070, 0.0, 0.120)
         # self.eTc *= sm.SE3().Rz(np.deg2rad(90))
@@ -76,17 +99,19 @@ class PBVS_aruco(Node):
         self.eTc.R = self.camRotm
         # camera to end-effector transform (cTe)
         self.cTe = self.eTc.inv()
-
+        """
+        
         # adjoint transformation (camera frame velocity to end-effector frame velocity transform)
         self.ADeTc = np.zeros((6, 6))
-        self.ADeTc[0:3, 0:3] = self.eTc.R
-        self.ADeTc[3:6, 3:6] = self.eTc.R
-        etc_x = np.array([               # skew symmetric matrix of translation (eTc.t)
-            [0, (-1 * self.eTc.t[2]), self.eTc.t[1]],
-            [self.eTc.t[2], 0, (-1 * self.eTc.t[0])],
-            [(-1 * self.eTc.t[1]), self.eTc.t[0], 0]
+        self.ADeTc[0:3, 0:3] = self.eTc[0:3, 0:3]
+        self.ADeTc[3:6, 3:6] = self.eTc[0:3, 0:3]
+        eTc_t = self.eTc[0:3, 3]
+        etc_x = np.array([               # skew symmetric matrix of translation (eTc_t)
+            [0, (-1 * eTc_t[2]), eTc_t[1]],
+            [eTc_t[2], 0, (-1 * eTc_t[0])],
+            [(-1 * eTc_t[1]), eTc_t[0], 0]
         ])
-        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc.R
+        self.ADeTc[3:6, 0:3] = etc_x @ self.eTc[0:3, 0:3]
         # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
 
         # adjoint transformation cVe - transforms velocity from camera to end effector frame
@@ -111,7 +136,7 @@ class PBVS_aruco(Node):
 
         # setup pinocchio
         self.robotModel = pinocchio.buildModelsFromUrdf("/home/logesh/fanuc_ws/src/fanuc_ros2_drivers/src/fanuc_description/urdf/lrmate200id4s.urdf")[0]
-        self.robotData = pinocchio.createDatas(self.robotModel)
+        self.robotData = pinocchio.createDatas(self.robotModel)[0]
         self.eeFrameId = self.robotModel.getFrameId("tool0")
 
         # PID control (TODO: tune this)
@@ -183,10 +208,12 @@ class PBVS_aruco(Node):
     def pose_sub_cb(self, msg):
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
-            self.arucoPose = sm.SE3(msg.position.x, msg.position.y, msg.position.z)
+            self.arucoPose = np.eye(4)
+            self.arucoPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
             # self.arucoPose.t *= 1000        # to mm
-            quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
-            self.arucoPose.R = quat.R
+            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
+            # quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
+            self.arucoPose[0:3, 0:3] = rotm
         else:
             self.arucoPose = None
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -199,6 +226,37 @@ class PBVS_aruco(Node):
 
         pix_vel = self.pixelVel_gain * (np.subtract(np.array(des_point), np.array(cur_point)))
         return pix_vel
+
+    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0, error_array):
+        """
+        Function to compute adaptive gain based on the error vector and other paramters
+        This approach was inspired from `ViSP team`.
+        Args:
+            - lam_0 : float, gain value at error = 0    (i.e., where error is small)
+            - lam_inf : float, gain value at error = infinity (i.e., where error is very large)
+            - lam_s0 : float, gain at slope in 0 (i.e., idk)
+            - error_array : array[float], error array
+        
+        - e_vec : np.ndarray(), dtype=float64, error vector
+        """
+        
+        # parameters
+        a = lam_0 - lam_inf
+        b = lam_s0 / a
+        c = lam_inf
+        
+        # compute infinite norm of error vector (i.e., getting abs max of error vector)
+        x_norm = 0.0
+        for err in error_array:
+            abs_err = abs(err[0])
+            if (abs_err > x_norm):
+                x_norm = abs_err 
+
+        # adaptive gain (lam_adapt)
+        lam_adapt = (a * np.exp(-1 * b * x_norm)) + c
+
+        # set adaptive gain to `self.lambdaVar`
+        self.lambdaVar = lam_adapt
 
     def computeCamVel(self):
         """
@@ -214,17 +272,26 @@ class PBVS_aruco(Node):
 
         # current camera to object transform (cTo)
         cTo = self.arucoPose
-        cTo_t = np.array([cTo.t]).T
+        cTo_t = cTo[0:3, 3].reshape((3,1))
         cto_x = np.array([               # skew symmetric matrix of translation (cTo.t)
-            [0, (-1 * cTo.t[2]), cTo.t[1]],
-            [cTo.t[2], 0, (-1 * cTo.t[0])],
-            [(-1 * cTo.t[1]), cTo.t[0], 0]
+            [0, (-1 * cTo_t[2][0]), cTo_t[1][0]],
+            [cTo_t[2][0], 0, (-1 * cTo_t[0][0])],
+            [(-1 * cTo_t[1][0]), cTo_t[0][0], 0]
         ])
-        cTo_thetaU = Rotation.from_matrix(cTo.R).as_rotvec().reshape(3,1)        # aixs rotation vector
+        cTo_thetaU = Rotation.from_matrix(cTo[0:3, 0:3]).as_rotvec().reshape(3,1)        # aixs rotation vector
 
         # desired camera to object transform (dcTo)
-        dcTo = sm.SE3(0, 0,  0.3)                       # desired trasform should be 30cm above the aruco board
-        dcTo_t = np.array([dcTo.t]).T
+        dcTo = np.eye(6)
+        dcTo[0:3, 3] = np.array([0, 0,  0.4])                       # desired trasform should be 30cm above the aruco board
+        dcTo_t = dcTo[0:3, 3].reshape((3,1))
+
+        # Adaptive gain (lambda_adapt)
+        errorArray = np.empty((6,1))
+        errorArray[0:3, :] = (dcTo_t - cTo_t)
+        errorArray[3:6, :] = cTo_thetaU
+        self.setAdaptiveGain(0.3, 0.2, 30.0, errorArray)           # default - [1.666, 0.666, 1.666] 
+        # tuning adaptive gain parameter using constant lambda
+        # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
 
         # compute velocity
         Vc = -1 * self.lambdaVar * ((dcTo_t - cTo_t) + (cto_x @ cTo_thetaU))
@@ -248,19 +315,22 @@ class PBVS_aruco(Node):
             # print(np.round(camVel[3:].flatten(), 4))
             # print(np.round(self.ee_vel[3:], 4))
             # print()
+            
             self.ee_vel[3] *= -1
             self.ee_vel[4] *= -1
             self.ee_vel[5] *= -1
-
+            
 
             # log ee_vel and camvel
+            """
             self.writer.writerow(self.ee_vel)
             self.writer1.writerow(camVel.flatten())
             temp = []
             temp.extend(self.arucoPose.t.flatten().tolist())
             temp.extend(Rotation.from_matrix(self.arucoPose.R).as_quat().flatten().tolist())
             self.writer2.writerow(temp)
-
+            """
+            
             """
             # current pose of end effector
             curEEPose = np.array(self.bot.read_current_cartesian_pose())    # [x, y, z, w, p, r]
@@ -400,7 +470,7 @@ class PBVS_aruco(Node):
             """
             # NOTE: commenting joint 2 (flip) - fixed using pinocchio pkg
             # joint_vels[1] *= -1
-            joint_vels[3] = 0.0
+            # joint_vels[3] = 0.0
 
             # compute target joint position from joint velocities
             target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)

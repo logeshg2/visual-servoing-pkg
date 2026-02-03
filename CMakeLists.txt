@@ -39,6 +39,7 @@ install(PROGRAMS
   scripts/superglue_n_points.py
   visual_servoing_pkg/ibvs_aruco_corner.py
   visual_servoing_pkg/pbvs_aruco_pose.py
+  visual_servoing_pkg/ibvs_n_points.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

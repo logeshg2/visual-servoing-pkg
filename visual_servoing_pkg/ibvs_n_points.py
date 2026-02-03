@@ -64,7 +64,7 @@ class IBVS_n_points(Node):
         # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
 
         # robot arm controllers
-        # self.bot = robot("192.168.1.9")
+        self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
         self.dt = 1.0   # parameter for velocity integration
@@ -181,7 +181,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using depth frame (reference depth frame)
         for point in self.match_0:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[0], point[1]])
+                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[1], point[0]])
             )
 
         # desired points interaction matrix
@@ -210,7 +210,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using current depth frame
         for point in self.match_1:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[0], point[1]])
+                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[1], point[0]])
             )
 
         # desired points interaction matrix
@@ -234,7 +234,10 @@ class IBVS_n_points(Node):
         xy = self.Kinv @ point
         x = xy[0, 0]
         y = xy[1, 0]
-        Z = Z
+        Z = max(Z, 1e-6)
+
+        # if (Z < 1e-6):
+        #     print(Z)
 
         # image jacobian template(or formula) - 2x6
         img_jacobian = np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
@@ -458,12 +461,12 @@ class IBVS_n_points(Node):
 def main():
     rclpy.init()
 
-    try:
-        node = IBVS_n_points()
-        rclpy.spin(node)
-    except Exception as e:
-        print(f"Shutting down IBVS node:\nException: {e}")
-        node.destroy_node()
+    # try:
+    node = IBVS_n_points()
+    rclpy.spin(node)
+    # except Exception as e:
+    #     print(f"Shutting down IBVS node:\nException: {e}")
+    #     node.destroy_node()
         # rclpy.shutdown()
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ set(action_files
 )
 set(msg_files
   "msg/ArucoCorner.msg"
+  "msg/MatchedPoints.msg"
 )
 set(srv_files
 )

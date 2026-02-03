@@ -8,7 +8,6 @@ This packages uses PyTorch + GPU for feature detection and matching.
 
 import cv2
 import torch
-import pickle
 import numpy as np
 import pyrealsense2 as rs
 import matplotlib.cm as cm
@@ -19,8 +18,7 @@ from rclpy.node import Node
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from tf2_ros import TransformBroadcaster
-from std_msgs.msg import Int64MultiArray
-from geometry_msgs.msg import Pose, TransformStamped
+from visual_servoing_pkg.msg import MatchedPoints
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from models.matching import Matching
@@ -34,6 +32,7 @@ class ArucoNode(Node):
 
         self.color_frame = None
         self.depth_frame = None
+        self.collect_refImg = False
         self.frame_width = 640
         self.frame_height = 480
         self.frame_center = np.array([int(self.frame_width // 2), int(self.frame_height // 2)])
@@ -55,6 +54,8 @@ class ArucoNode(Node):
         # superglue model setup
         self.device = None
         self.refImg = None
+        self.depthRefImg = None         # depth of each feature points in the refImage
+        self.depthCurImg = None         # depth of each feature points in the curImage
         self.stackImage = None
         self.refData = None
         self.matchingModel = None
@@ -65,12 +66,13 @@ class ArucoNode(Node):
         # log
         self.get_logger().info(f"Found device (for inference): {self.device}")
 
-
         # ros2 communication variables
         self.cvBridge = CvBridge()
         self.tf_broadcaster = TransformBroadcaster(self)
         self.img_group = MutuallyExclusiveCallbackGroup()
         self.img_publisher = self.create_publisher(Image, "/processed_image", 10, callback_group=self.img_group)
+        self.depthImg_publisher = self.create_publisher(Image, "/depth_image", 10, callback_group=self.img_group)
+        self.matchPoints_publisher = self.create_publisher(MatchedPoints, "/matched_points", 10, callback_group=self.img_group)
 
         # image reader timer
         self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
@@ -137,7 +139,7 @@ class ArucoNode(Node):
         keys = ['keypoints', 'scores', 'descriptors']
 
         # load reference image
-        self.refImg = cv2.imread("../doc/images/ref_img_socket.png", cv2.IMREAD_GRAYSCALE)
+        self.refImg = cv2.imread("/home/logesh/fanuc_ws/src/visual-servoing-pkg/doc/images/ref_img_socket.png", cv2.IMREAD_GRAYSCALE)
         self.refImg = cv2.resize(self.refImg, (640, 480))
         refTensor = frame2tensor(self.refImg, self.device)
         # compute feature extraction - reference image
@@ -149,39 +151,46 @@ class ArucoNode(Node):
         """Function to process image and find feature points"""
         
         if (self.color_frame is None):
+            self.match0 = None
+            self.match1 = None
             return
         
-        cur_grayImg = cv2.cvtColor(self.color_frame, cv2.COLOR_BGR2GRAY)
-        # tensor frame
-        cur_tensorImg = frame2tensor(cur_grayImg, self.device)
-        # feature prediction and matching 
-        pred = self.matchingModel({**self.refData, 'image1': cur_tensorImg})
-        kpts0 = self.refData['keypoints0'][0].cpu().numpy()
-        kpts1 = pred['keypoints1'][0].cpu().numpy()
-        matches = pred['matches0'][0].cpu().numpy()
-        confidence = pred['matching_scores0'][0].cpu().numpy()
-        # compute valid pairs
-        valid = matches > -1
-        self.match0 = kpts0[valid]
-        self.match1 = kpts1[matches[valid]]
-        color = cm.jet(confidence[valid])
-        
-        # stacked image
-        """
-        # img1 = cv2.circle(self.refImg, list(map(int, mkpts0[0])), 10, (255, 0, 0), -1)
-        # img2 = cv2.circle(cur_grayImg, list(map(int, mkpts1[0])), 10, (255, 0, 0), -1)
-        self.stackImage = make_matching_plot_fast(
-            self.refImg, cur_grayImg, kpts0, kpts1, self.match0, self.match1, color, "",
-            path=None, show_keypoints=True)
-        # self.stackImage = np.vstack([img1, img2])
-        """
+        try:
+            cur_grayImg = cv2.cvtColor(self.color_frame, cv2.COLOR_BGR2GRAY)
+            # tensor frame
+            cur_tensorImg = frame2tensor(cur_grayImg, self.device)
+            # feature prediction and matching 
+            pred = self.matchingModel({**self.refData, 'image1': cur_tensorImg})
+            kpts0 = self.refData['keypoints0'][0].cpu().numpy()
+            kpts1 = pred['keypoints1'][0].cpu().numpy()
+            matches = pred['matches0'][0].cpu().numpy()
+            confidence = pred['matching_scores0'][0].cpu().numpy()
+            # compute valid pairs
+            valid = matches > -1
+            self.match0 = kpts0[valid]
+            self.match1 = kpts1[matches[valid]]
+            color = cm.jet(confidence[valid])
+            
+            # stacked image
+            """
+            # img1 = cv2.circle(self.refImg, list(map(int, mkpts0[0])), 10, (255, 0, 0), -1)
+            # img2 = cv2.circle(cur_grayImg, list(map(int, mkpts1[0])), 10, (255, 0, 0), -1)
+            self.stackImage = make_matching_plot_fast(
+                self.refImg, cur_grayImg, kpts0, kpts1, self.match0, self.match1, color, "",
+                path=None, show_keypoints=True)
+            # self.stackImage = np.vstack([img1, img2])
+            """
 
-        # plot matched points in current frame (used SuperGlue utils)
-        color = (np.array(color[:, :3])*255).astype(int)[:, ::-1]
-        for (x1, y1), c in zip(self.match1, color):
-            c = c.tolist()
-            # display line end-points as circles
-            cv2.circle(self.color_frame, (int(x1), int(y1)), 2, c, -1, lineType=cv2.LINE_AA)
+            # plot matched points in current frame (used SuperGlue utils)
+            color = (np.array(color[:, :3])*255).astype(int)[:, ::-1]
+            for (x1, y1), c in zip(self.match1, color):
+                c = c.tolist()
+                # display line end-points as circles
+                cv2.circle(self.color_frame, (int(x1), int(y1)), 2, c, -1, lineType=cv2.LINE_AA)
+        except Exception as e:
+            self.get_logger().warn(f"Exception occured: {e}")
+            self.match0 = None
+            self.match1 = None
 
     def image_reader_timer(self):
         try:
@@ -191,6 +200,12 @@ class ArucoNode(Node):
 
             self.color_frame = np.asanyarray(aligned_frames.get_color_frame().get_data())
             self.depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
+
+            # collect refernce image
+            if (self.collect_refImg and (self.color_frame is not None and self.depth_frame is not None)):
+                self.collect_refImg = False
+                cv2.imwrite("../doc/images/ref_img_socket.png", self.color_frame)
+                np.savez("../doc/images/ref_img_socket_depth.npz", depthArr=self.depth_frame)
         except Exception as e:
             self.color_frame = None
             self.depth_frame = None
@@ -201,11 +216,22 @@ class ArucoNode(Node):
 
         # process the image (feature detection and processing)
         self.processImage()
+        self.get_logger().info(f"Number of matches found: {len(self.match0)}")
+
+        # publish matched poin (if available)
+        if (self.match0 is not None and self.match1 is not None):
+            msg1 = MatchedPoints()
+            msg1.rows, msg1.cols = self.match0.shape
+            msg1.match_0 = np.int64(self.match0).flatten().tolist()
+            msg1.match_1 = np.int64(self.match1).flatten().tolist()
+            self.matchPoints_publisher.publish(msg1)
 
         # publish processed image
-        msg = Image()
-        msg= self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")
+        msg = self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")
         self.img_publisher.publish(msg)
+        # publish depth image
+        msg = self.cvBridge.cv2_to_imgmsg(self.depth_frame)
+        self.depthImg_publisher.publish(msg)
 
 
 def main():

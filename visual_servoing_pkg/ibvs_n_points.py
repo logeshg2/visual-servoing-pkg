@@ -10,44 +10,19 @@ from scipy.spatial.transform import Rotation
 
 import rclpy
 from rclpy.node import Node
+from cv_bridge import CvBridge
 from std_srvs.srv import SetBool
-from geometry_msgs.msg import Pose
-from visual_servoing_pkg.msg import ArucoCorner
+from sensor_msgs.msg import Image
+from visual_servoing_pkg.msg import MatchedPoints
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from ComDependencies.robot_controller import robot
 import pinocchio
 
 
-class IBVS_aruco(Node):
+class IBVS_n_points(Node):
     def __init__(self):
-        super().__init__("ibvs_aruco_node")
-
-        # aruco variables
-        self.cur_top_left = None
-        self.cur_top_right = None
-        self.cur_bottom_right = None
-        self.cur_bottom_left = None
-        # target aruco points
-        self.tar_top_left = np.array([202, 119])
-        self.tar_top_right = np.array([438, 118])
-        self.tar_bottom_right = np.array([439, 355])
-        self.tar_bottom_left = np.array([203, 355])
-        self.tar_Z = 0.372        # 30 cm above the board
-        # aruco pose variable
-        self.arucoPose = None
-        # aruco object points
-        self.markerLength = 0.1
-        self.object_points = np.array([
-            [-self.markerLength / 2, -self.markerLength / 2, 0],
-            [self.markerLength / 2, -self.markerLength / 2, 0],
-            [self.markerLength / 2, self.markerLength / 2, 0],
-            [-self.markerLength / 2, self.markerLength / 2, 0]
-        ])
-        # aruco corners depth in camera frame
-        self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])   # [topLeft, topRight, bottomRight, bottomLeft]
-        # aruco desired points jacobian or interation matrix (8x6)
-        self.desiredIntMat = np.array([])
+        super().__init__("ibvs_n_points_node")
 
         # image jacobian | velocity variables
         self.lambdaVar =  0.4                  # exponential decay factor (Lambda)
@@ -57,12 +32,13 @@ class IBVS_aruco(Node):
         self.curCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.prevCamVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
+        # desired points jacobian or interation matrix
+        self.desiredIntMat = np.array([])
+        # current points jacobian or interation matrix
+        self.currentIntMat = np.array([])
+
         # camera intrinsic (realsense)
-        self.K = np.array([
-            [607.0556030273438, 0.0, 328.3836364746094],
-            [0.0, 606.6974487304688, 241.04295349121094],
-            [0.0, 0.0, 1.0]
-        ])
+        self.K = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb"))
         self.Kinv = np.linalg.inv(self.K)
         
         # camera extrinsic for realsense (eye in hand config)
@@ -88,7 +64,7 @@ class IBVS_aruco(Node):
         # print("Adjoint Transformation (Ad_eTc):\n", self.ADeTc)
 
         # robot arm controllers
-        self.bot = robot("192.168.1.9")
+        # self.bot = robot("192.168.1.9")
         self.triggered = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
         self.dt = 1.0   # parameter for velocity integration
@@ -121,16 +97,51 @@ class IBVS_aruco(Node):
         ])
         self.maIdx = 0
 
+        # variables
+        self.depthImg = None
+        self.match_0 = None
+        self.match_1 = None
+        self.cv_bridge = CvBridge()
+        # reference depth image
+        self.refDepthImg = np.load("/home/logesh/fanuc_ws/src/visual-servoing-pkg/doc/images/ref_img_socket_depth.npz")['depthArr']
+        self.refDepthImg = np.float64(self.refDepthImg) / 1000.0            # in meters
+
+        # NOTE: Desired interation matric will not be constant - for n-points approach
         # compute desired interaction matrix - this will be constant
-        self.computeDesiredInteractionMat()
+        # self.computeDesiredInteractionMat()
 
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
-        self.corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
-        self.pose_sub = self.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
+        self.depthImg_sub = self.create_subscription(Image, "/depth_image", self.depthImg_cb, 10)
+        self.matchPoints_sub = self.create_subscription(MatchedPoints, "/matched_points", self.matched_points_cb, 10)
         self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
 
+
+    def depthImg_cb(self, msg):
+        """Function to extract depth image from ros2 image message"""
+        
+        if (msg is not None):
+            self.depthImg = self.cv_bridge.imgmsg_to_cv2(msg)
+            self.depthImg = np.float64(self.depthImg) / 1000.0          # in meters
+        else:
+            self.depthImg = None
+            self.get_logger().warn(f"Depth image is None!")
+
+    def matched_points_cb(self, msg):
+        """Function to extract matched points from the ros2 custom message"""
+
+        if (msg.rows is not None and (msg.rows != 0 and msg.rows != -1)):
+            rows = msg.rows
+            cols = msg.cols
+
+            self.match_0 = np.array(msg.match_0).reshape((rows, cols))
+            self.match_1 = np.array(msg.match_1).reshape((rows, cols))
+
+        else:
+            self.match_0 = None
+            self.match_1 = None
+            # self.get_logger().warn(f"Matched points published are not enough!")
 
     def trigger_servoing_cb(self, request, response):
         if (request.data):
@@ -150,10 +161,11 @@ class IBVS_aruco(Node):
 
     def computeDesiredInteractionMat(self):
         """
-        Function to compute desired aruco corner points interaction matrix
+        Function to compute desired n - points interaction matrix
         This matrix computed will be used for `Approximation of Interaction Matrix`.
         """
 
+        """
         # desire aruco points (corners) interaction matrix
         p1_jac = self.computeInteractionMatrix(self.tar_top_left[0], self.tar_top_left[1], self.tar_Z)
         p2_jac = self.computeInteractionMatrix(self.tar_top_right[0], self.tar_top_right[1], self.tar_Z)
@@ -162,6 +174,48 @@ class IBVS_aruco(Node):
         # points jacobian (for all for points) - 8x6 matrix
         # desired points interaction matrix
         self.desiredIntMat = np.vstack([p1_jac, p2_jac, p3_jac, p4_jac])
+        """
+
+        tempLst = []
+        # compute interation matrix for all matched points in reference image
+        # for ref point depth - using depth frame (reference depth frame)
+        for point in self.match_0:
+            tempLst.append(
+                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[0], point[1]])
+            )
+
+        # desired points interaction matrix
+        self.desiredIntMat = np.array([])
+        self.desiredIntMat = np.vstack(tempLst)
+
+    def computeCurrentInteractionMat(self):
+        """
+        Function to compute current n - points interaction matrix
+        This matrix computed will be used for `Approximation of Interaction Matrix`.
+        """
+
+        """
+        # compute interation matrix (combain all for points interation matrix)
+        top_left_jacob = self.computeInteractionMatrix(self.cur_top_left[0], self.cur_top_left[1], self.cornerDepth[0])
+        top_right_jacob = self.computeInteractionMatrix(self.cur_top_right[0], self.cur_top_right[1], self.cornerDepth[1])
+        bottom_right_jacob = self.computeInteractionMatrix(self.cur_bottom_right[0], self.cur_bottom_right[1], self.cornerDepth[2])
+        bottom_left_jacob = self.computeInteractionMatrix(self.cur_bottom_left[0], self.cur_bottom_left[1], self.cornerDepth[3])
+        # points jacobian (for all for points) - 8x6 matrix
+        # current points jacobian
+        self.currentIntMat = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
+        """
+
+        tempLst = []
+        # compute interation matrix for all matched points in current image
+        # for ref point depth - using current depth frame
+        for point in self.match_1:
+            tempLst.append(
+                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[0], point[1]])
+            )
+
+        # desired points interaction matrix
+        self.currentIntMat = np.array([])
+        self.currentIntMat = np.vstack(tempLst)
 
     def computeInteractionMatrix(self, u, v, Z):
         """
@@ -218,32 +272,6 @@ class IBVS_aruco(Node):
         # set adaptive gain to `self.lambdaVar`
         self.lambdaVar = lam_adapt
 
-    def corners_sub_cb(self, msg):
-        if (msg.top_left is not None):
-            self.cur_top_left = msg.top_left
-            self.cur_top_right = msg.top_right
-            self.cur_bottom_right = msg.bottom_right
-            self.cur_bottom_left = msg.bottom_left
-        else:
-            self.cur_top_left = None
-            self.cur_top_right = None
-            self.cur_bottom_right = None
-            self.cur_bottom_left = None
-            self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-    def pose_sub_cb(self, msg):
-        if (msg.position is not None and msg.position.x != -1.0):
-            # pose extraction
-            self.arucoPose = np.eye(4)
-            self.arucoPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
-            # self.arucoPose.t *= 1000        # to mm
-            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
-            # quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
-            self.arucoPose[0:3, 0:3] = rotm
-        else:
-            self.arucoPose = None
-            self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
     def computeImgPointVel(self, des_point, cur_point):
         """
         function to compute image pixel (i.e., change in image place) velocity between two points.
@@ -274,10 +302,22 @@ class IBVS_aruco(Node):
             self.cornerDepth[idx] = cTp[2, 3]   # depth (Z value)   
 
     def computeCamVel(self):
-        # compute depth corners
-        self.computeCornerDepth()
-        # populated - `self.cornerDepth` array - [topLeft, topRight, bottomRight, bottomLeft]
+        """
+        Function to compute camera velocity based on image pixel velocity or pixel error.
+        For N-Points approach, at each inference desired interaction matrix is computed + current points interation matrix is also formed.
+        """
 
+        # compute desired interation matrix of the matched feature points in the reference image.
+        self.computeDesiredInteractionMat()
+
+        # compute current points interation matrix of the matched feature points in the current image.
+        self.computeCurrentInteractionMat()
+
+        # [IMP]
+        # Approximation of Interaction Matrix
+        approxIntMat = (self.currentIntMat + self.desiredIntMat) / 2
+
+        """
         # compute pixel velocity
         top_left_pix_vel = self.computeImgPointVel(self.tar_top_left, self.cur_top_left)
         top_right_pix_vel = self.computeImgPointVel(self.tar_top_right, self.cur_top_right)
@@ -286,19 +326,15 @@ class IBVS_aruco(Node):
         # flatten pixel velocities (here - 8x1 vector)
         self.pixelVel = np.array([top_left_pix_vel.flatten(), top_right_pix_vel.flatten(), bottom_right_pix_vel.flatten(), bottom_left_pix_vel.flatten()])
         self.pixelVel = np.array([self.pixelVel.flatten()]).T     # [[u1_dot], [v1_dot], [u2_dot], [v2_dot], [u3_dot], [v3_dot], [u4_dot], [v4_dot]] - 8x1
+        """
 
-        # compute interation matrix (combain all for points interation matrix)
-        top_left_jacob = self.computeInteractionMatrix(self.cur_top_left[0], self.cur_top_left[1], self.cornerDepth[0])
-        top_right_jacob = self.computeInteractionMatrix(self.cur_top_right[0], self.cur_top_right[1], self.cornerDepth[1])
-        bottom_right_jacob = self.computeInteractionMatrix(self.cur_bottom_right[0], self.cur_bottom_right[1], self.cornerDepth[2])
-        bottom_left_jacob = self.computeInteractionMatrix(self.cur_bottom_left[0], self.cur_bottom_left[1], self.cornerDepth[3])
-        # points jacobian (for all for points) - 8x6 matrix
-        # current points jacobian
-        pointsJacob = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
-
-        # [IMP]
-        # Approximation of Interaction Matrix   (8x6)
-        approxIntMat = (pointsJacob + self.desiredIntMat) / 2
+        # compute pixel velocity
+        tempLst = []
+        for refPoint, curPoint in zip(self.match_0, self.match_1):
+            tempLst.extend(
+                self.computeImgPointVel(refPoint, curPoint).flatten().tolist()
+            )
+        self.pixelVel = np.array(tempLst).reshape(((len(self.match_0) * 2), 1))     # column vector
 
         # Adaptive gain (lambda_adapt)
         self.setAdaptiveGain(0.5, 0.3, 30.0)           # default - [1.666, 0.666, 1.666] 
@@ -307,7 +343,7 @@ class IBVS_aruco(Node):
 
         # compute camVel 
         # camVel = -1 * self.lambdaVar * (inv(approxIntMat) @ pixelVel)
-        camVel = -1 * self.lambdaVar * (np.linalg.pinv(approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
+        camVel = -1 * self.lambdaVar * (np.linalg.pinv(approxIntMat) @ self.pixelVel)
         # NOTE: self.lambdaVar is negative for Eye in Hand, and positive for Eye to Hand
         # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
         
@@ -316,8 +352,8 @@ class IBVS_aruco(Node):
         return camVel.flatten()
     
     def computeEEVel(self):
-        # check aruco corners detection
-        if (self.cur_top_left is not None and self.cur_top_left[0] != -1):
+        # check matches between refImg and curImg - and also matched points should be atleast 4 (IMP)
+        if (self.match_0 is not None and len(self.match_0) >= 4):
             # compute desired camera velocity
             self.curCamVel = self.computeCamVel()
             # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
@@ -333,28 +369,9 @@ class IBVS_aruco(Node):
             # self.ee_vel[4] *= -1
             # self.ee_vel[5] *= -1
 
-
-            """
-            # camera velocity to end effector velocity
-            temp_ee_vel = self.ADeTc @ np.array([self.curCamVel.flatten()]).T
-            # print(np.round(temp_ee_vel, 4)
-            # for now - lets servo only on x, y, and z (or 3D servoing)
-            self.ee_vel[0] = temp_ee_vel[0]
-            self.ee_vel[1] = temp_ee_vel[1]
-            self.ee_vel[2] = temp_ee_vel[2]
-            # self.ee_vel[3] = temp_ee_vel[3]
-            # self.ee_vel[4] = temp_ee_vel[4]
-            # self.ee_vel[5] = temp_ee_vel[5]
-            # self.vel_error = np.subtract(self.curCamVel, self.prevCamVel)
-            # self.vel_error = temp_ee_vel
-            # self.ee_vel[0] = (self.vel_error[0] * self.KPX) + (self.vel_error[0] * self.KIX) + (self.vel_error[0] * self.KDX)
-            # self.ee_vel[1] = (self.vel_error[1] * self.KPY) + (self.vel_error[1] * self.KIY) + (self.vel_error[1] * self.KDY)
-            # self.ee_vel[2] = (self.vel_error[2] * self.KPZ) + (self.vel_error[2] * self.KIZ) + (self.vel_error[2] * self.KDZ)
-            # self.ee_vel[0] *= -1    # invert x-axis
-            # self.ee_vel[0], self.ee_vel[1] = self.ee_vel[1], self.ee_vel[0]
-            self.prevCamVel = self.curCamVel.copy()
-            """
         else:
+            n_matches = 0 if (self.match_0 is None) else len(self.match_0)
+            self.get_logger().warn(f"Not enough feature matches to perform servoing: {n_matches}")
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     def integrateVel(self, qpos, qvel):
@@ -442,7 +459,7 @@ def main():
     rclpy.init()
 
     try:
-        node = IBVS_aruco()
+        node = IBVS_n_points()
         rclpy.spin(node)
     except Exception as e:
         print(f"Shutting down IBVS node:\nException: {e}")

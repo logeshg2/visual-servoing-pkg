@@ -225,6 +225,10 @@ class ArucoNode(Node):
             msg1.match_0 = np.int64(self.match0).flatten().tolist()
             msg1.match_1 = np.int64(self.match1).flatten().tolist()
             self.matchPoints_publisher.publish(msg1)
+        else:
+            msg1.rows = -1
+            msg1.cols = -1
+            self.matchPoints_publisher.publish(msg1)
 
         # publish processed image
         msg = self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")

@@ -39,11 +39,11 @@ class ArucoNode(Node):
         self.frame_center = np.array([int(self.frame_width // 2), int(self.frame_height // 2)])
 
         # camera intrinsic's
-        K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix.pkl", "rb")
-        dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef.pkl", "rb")
+        K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb")
+        dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl", "rb")
         self.K = pickle.load(K_fp)
-        self.K[0, 2] = 320.0            # calibration is little off (for fingers camera)
-        self.K[1, 2] = 240.0
+        # self.K[0, 2] = 320.0            # calibration is little off (for fingers camera)
+        # self.K[1, 2] = 240.0
         self.camDist = pickle.load(dist_fp)
 
         # logging

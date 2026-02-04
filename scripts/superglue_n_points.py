@@ -205,7 +205,7 @@ class ArucoNode(Node):
             if (self.collect_refImg and (self.color_frame is not None and self.depth_frame is not None)):
                 self.collect_refImg = False
                 cv2.imwrite("../doc/images/ref_img_socket.png", self.color_frame)
-                np.savez("../doc/images/ref_img_socket_depth.npz", depthArr=self.depth_frame)
+                np.savez("../doc/images/ref_img_socket_depth.npz", depthArr=np.float64(self.depth_frame))
         except Exception as e:
             self.color_frame = None
             self.depth_frame = None

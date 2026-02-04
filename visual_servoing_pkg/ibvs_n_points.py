@@ -181,7 +181,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using depth frame (reference depth frame)
         for point in self.match_0:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[0], point[1]])
+                self.computeInteractionMatrix(point[0], point[1], 0.35) #self.refDepthImg[point[0], point[1]]
             )
 
         # desired points interaction matrix
@@ -210,7 +210,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using current depth frame
         for point in self.match_1:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[0], point[1]])
+                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[1], point[0]])
             )
 
         # desired points interaction matrix
@@ -234,10 +234,22 @@ class IBVS_n_points(Node):
         xy = self.Kinv @ point
         x = xy[0, 0]
         y = xy[1, 0]
-        Z = max(Z, 1e-6)
+        Z = Z
+        # Z = max(Z, 1e-1)
 
-        # if (Z < 1e-6):
-        #     print(Z)
+        if (Z < 1e-6):
+            # print(f"{Z} - ({u}, {v})")
+            # take average of surrounding depth
+            avgZ = 1e-2     # start with minimum possible value
+            count = 1
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    new_u = u + dx
+                    new_v = v + dy
+                    if ((new_u >= 0 and new_u < self.depthImg.shape[1]) and (new_v >= 0 and new_v < self.depthImg.shape[0])):
+                        avgZ += self.depthImg[new_v, new_u]
+                        count += 1
+            Z = (avgZ / count)
 
         # image jacobian template(or formula) - 2x6
         img_jacobian = np.array([[(-1/Z), 0, (x/Z), (x*y), -(1+(x*x)), y], 
@@ -319,6 +331,7 @@ class IBVS_n_points(Node):
         # [IMP]
         # Approximation of Interaction Matrix
         approxIntMat = (self.currentIntMat + self.desiredIntMat) / 2
+        approxIntMat = self.desiredIntMat
 
         """
         # compute pixel velocity

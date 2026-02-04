@@ -181,7 +181,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using depth frame (reference depth frame)
         for point in self.match_0:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[1], point[0]])
+                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[0], point[1]])
             )
 
         # desired points interaction matrix
@@ -210,7 +210,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using current depth frame
         for point in self.match_1:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[1], point[0]])
+                self.computeInteractionMatrix(point[0], point[1], self.depthImg[point[0], point[1]])
             )
 
         # desired points interaction matrix

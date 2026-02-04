@@ -216,7 +216,8 @@ class ArucoNode(Node):
 
         # process the image (feature detection and processing)
         self.processImage()
-        self.get_logger().info(f"Number of matches found: {len(self.match0)}")
+        match_len = 0 if (self.match0 is None) else len(self.match0)
+        self.get_logger().info(f"Number of matches found: {match_len}")
 
         # publish matched poin (if available)
         if (self.match0 is not None and self.match1 is not None):
@@ -226,6 +227,7 @@ class ArucoNode(Node):
             msg1.match_1 = np.int64(self.match1).flatten().tolist()
             self.matchPoints_publisher.publish(msg1)
         else:
+            msg1 = MatchedPoints()
             msg1.rows = -1
             msg1.cols = -1
             self.matchPoints_publisher.publish(msg1)

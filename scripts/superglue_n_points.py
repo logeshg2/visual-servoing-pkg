@@ -97,6 +97,8 @@ class ArucoNode(Node):
         pipeline_profile = rs_config.resolve(pipeline_wrapper)
         device = pipeline_profile.get_device()
         self.realsenseDev = str(device.get_info(rs.camera_info.product_line))
+        # filtering and hole filling parameter
+        self.hole_filling = rs.hole_filling_filter()
         # get intrinsic's of camera frame
         depth_profile = profile.get_stream(rs.stream.depth).as_video_stream_profile()
         color_profile = profile.get_stream(rs.stream.color).as_video_stream_profile()
@@ -199,7 +201,11 @@ class ArucoNode(Node):
             aligned_frames = self.align.process(frames)
 
             self.color_frame = np.asanyarray(aligned_frames.get_color_frame().get_data())
-            self.depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
+            # self.depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
+
+            # apply filter to fill the holes in depth image
+            frame = aligned_frames.get_depth_frame()
+            self.depth_frame = np.asanyarray(self.hole_filling.process(frame).get_data())
 
             # collect refernce image
             if (self.collect_refImg and (self.color_frame is not None and self.depth_frame is not None)):

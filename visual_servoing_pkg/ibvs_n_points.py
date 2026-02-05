@@ -181,7 +181,7 @@ class IBVS_n_points(Node):
         # for ref point depth - using depth frame (reference depth frame)
         for point in self.match_0:
             tempLst.append(
-                self.computeInteractionMatrix(point[0], point[1], 0.35) #self.refDepthImg[point[0], point[1]]
+                self.computeInteractionMatrix(point[0], point[1], self.refDepthImg[point[0], point[1]])
             )
 
         # desired points interaction matrix
@@ -331,7 +331,7 @@ class IBVS_n_points(Node):
         # [IMP]
         # Approximation of Interaction Matrix
         approxIntMat = (self.currentIntMat + self.desiredIntMat) / 2
-        approxIntMat = self.desiredIntMat
+        # approxIntMat = self.desiredIntMat
 
         """
         # compute pixel velocity

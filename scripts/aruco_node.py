@@ -44,7 +44,7 @@ class ArucoNode(Node):
         self.K = pickle.load(K_fp)
         # self.K[0, 2] = 320.0            # calibration is little off (for fingers camera)
         # self.K[1, 2] = 240.0
-        self.camDist = pickle.load(dist_fp)
+        self.camDist = np.float64(pickle.load(dist_fp))
 
         # logging
         self.get_logger().info(f"Camera device id: {self.cam_dev_id}")
@@ -52,8 +52,8 @@ class ArucoNode(Node):
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
         # aruco detector
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        self.markerLength = 0.1
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
+        self.markerLength = 0.025
         parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
         self.aruco_center = None
@@ -61,11 +61,11 @@ class ArucoNode(Node):
         self.aruco_pose = None
 
         # target aruco points
-        self.tar_top_left = np.array([202, 119])
-        self.tar_top_right = np.array([438, 118])
-        self.tar_bottom_right = np.array([439, 355])
-        self.tar_bottom_left = np.array([203, 355])
-        self.tar_Z = 0.372
+        self.tar_top_left = np.array([270, 196])
+        self.tar_top_right = np.array([363, 196])
+        self.tar_bottom_right = np.array([363, 288])
+        self.tar_bottom_left = np.array([270, 289])
+        self.tar_Z = 0.163
 
         # ros2 communication variables
         self.cvBridge = CvBridge()

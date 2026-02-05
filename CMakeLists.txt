@@ -42,6 +42,7 @@ install(PROGRAMS
   visual_servoing_pkg/pbvs_aruco_pose.py
   visual_servoing_pkg/ibvs_n_points.py
   visual_servoing_pkg/ibvs_plug_hole.py
+  visual_servoing_pkg/ibvs_plug_pick_aruco.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

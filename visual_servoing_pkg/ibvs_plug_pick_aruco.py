@@ -90,6 +90,7 @@ class IBVS_plug_pick(Node):
         self.triggered = False
         self.converged = False
         self.picked = False
+        self.inServoing = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
         self.dt = 1.0   # parameter for velocity integration
         # joint config difference to reach the desired pick orientation
@@ -160,6 +161,9 @@ class IBVS_plug_pick(Node):
         time.sleep(2)
         while (self.bot.is_moving()):
             time.sleep(0.1)
+
+        # default gripper state
+        self.bot.air_gripper_control('open')
 
         response.success = True
         response.message = "trigger successful"
@@ -242,6 +246,7 @@ class IBVS_plug_pick(Node):
             self.cur_bottom_right = msg.bottom_right
             self.cur_bottom_left = msg.bottom_left
         else:
+            self.inServoing = False
             self.cur_top_left = None
             self.cur_top_right = None
             self.cur_bottom_right = None
@@ -258,6 +263,7 @@ class IBVS_plug_pick(Node):
             # quat = sm.UnitQuaternion([msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z])  # NOTE: [w, x, y, z]
             self.arucoPose[0:3, 0:3] = rotm
         else:
+            self.inServoing = False
             self.arucoPose = None
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -343,7 +349,9 @@ class IBVS_plug_pick(Node):
             # using adjoint transformation (Ad_eTc)
             self.ee_vel = (self.ADeTc @ self.curCamVel).flatten()       # (6,)
             # self.ee_vel[3:6] = [0.0, 0.0, 0.0]                        # comment to use angular velocities
+            self.inServoing = True
         else:
+            self.inServoing = False
             self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     def integrateVel(self, qpos, qvel):
@@ -382,11 +390,12 @@ class IBVS_plug_pick(Node):
             self.ee_vel = self.maVelFilter(self.ee_vel)
             print(np.round(self.ee_vel, 4))
 
-            # check convergence
-            if (np.all(self.ee_vel < 0.0004) and self.arucoPose is not None):
+            # check convergence ( only when servoing )
+            if (self.inServoing and np.all(self.ee_vel < 0.0004)):
                 self.get_logger().info(f"Visual Servoing Converged!")
                 self.triggered = False
                 self.converged = True
+                self.inServoing = False
                 self.get_logger().info(f"Performing picking operations")
                 return
 
@@ -420,16 +429,36 @@ class IBVS_plug_pick(Node):
             tarJointConfig = curJointConfig + self.diff2reach_pick
             # move to target pick location
             self.bot.write_joint_pose(tarJointConfig, blocking=False)
-            time.sleep(0.1)
+            time.sleep(1)
             while (self.bot.is_moving()):
                 time.sleep(0.1)
-
 
             # move z down
             curJointConfig = self.bot.read_current_joint_position()
             tarJointConfig = curJointConfig + self.pickmove
             # move to target pick location
             self.bot.write_joint_pose(tarJointConfig, blocking=False)
+            time.sleep(1)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+
+            # close gripper
+            self.bot.air_gripper_control("close")
+
+            # move z up
+            curJointConfig = self.bot.read_current_joint_position()
+            tarJointConfig = curJointConfig - self.pickmove
+            # move to target pick location
+            self.bot.write_joint_pose(tarJointConfig, blocking=False)
+            time.sleep(1)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+
+            # goback to tracking position
+            self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
+            time.sleep(2)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
 
             # perform picking
             self.picked = True

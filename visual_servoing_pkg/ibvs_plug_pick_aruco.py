@@ -12,7 +12,8 @@ from scipy.spatial.transform import Rotation
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, TransformStamped
+from tf2_ros import transform_broadcaster
 from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
@@ -93,23 +94,6 @@ class IBVS_plug_pick(Node):
         self.inServoing = False
         self.tracking_pose = [60.0, 240.0, 120.0, 179.65, 0.69, 67.63]
         self.dt = 1.0   # parameter for velocity integration
-        # joint config difference to reach the desired pick orientation
-        self.diff2reach_pick = np.array([
-            6.866737366,
-            21.30188942,
-            -7.431652069,
-            14.801146507,
-            6.56628418,
-            -21.535871267
-        ])
-        self.pickmove = np.array([
-            -0.000137329,
-            2.016841888,
-            -1.320640564,
-            3.238981247,
-            1.219207764,
-            -3.276504517
-        ])
 
         # setup pinocchio
         self.robotModel = pinocchio.buildModelsFromUrdf("/home/logesh/fanuc_ws/src/fanuc_ros2_drivers/src/fanuc_description/urdf/lrmate200id4s.urdf")[0]
@@ -141,6 +125,9 @@ class IBVS_plug_pick(Node):
 
         # compute desired interaction matrix - this will be constant
         self.computeDesiredInteractionMat()
+
+        # tf2 componenets
+        self.tf_broadcaster = transform_broadcaster.TransformBroadcaster(self)
 
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
@@ -378,6 +365,25 @@ class IBVS_plug_pick(Node):
 
         return fVels
 
+    def TF_publisher(self, trans, rotm):
+        # broadcast cTo tf
+        tf = TransformStamped()
+        tf.header.stamp = self.get_clock().now().to_msg()
+        tf.header.frame_id = 'tool0'
+        tf.child_frame_id = "target_ee"
+        
+        tf.transform.translation.x = trans[0]
+        tf.transform.translation.y = trans[1]
+        tf.transform.translation.z = trans[2]
+
+        quat = Rotation.from_matrix(rotm).as_quat()
+
+        tf.transform.rotation.x = quat[0]
+        tf.transform.rotation.y = quat[1]
+        tf.transform.rotation.z = quat[2]
+        tf.transform.rotation.w = quat[3]
+
+        self.tf_broadcaster.sendTransform(tf)
 
     def main_timer_cb(self):
         # perform visual servoing
@@ -424,6 +430,42 @@ class IBVS_plug_pick(Node):
 
         # perform picking (after convergence)
         if (self.converged and not self.picked):
+            # compute current ee pose
+            curPose = self.bot.read_current_cartesian_pose()
+            bTe = np.eye(4) 
+            bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
+            bTe[0:3, 0:3] = Rotation.from_euler("zyx", np.array(curPose[3:6]), degrees=True).as_matrix()
+            
+            # aruco to grip pose
+            aTo = np.eye(4)
+            aTo[0:3, 3] = np.array([0, 0.040, -0.040])
+            # camera to grip pose (self.arucoPose -> cTa)
+            cTo = self.arucoPose @ aTo
+
+            # ee to grip pose
+            eTo = self.eTc @ cTo
+            eTo[2, 3] -= 0.130
+            # eTo[0:3, 0:3] = np.eye(3)
+
+            # base to object pose
+            bTo = bTe @ eTo
+
+            print(Rotation.from_matrix(bTo[0:3, 0:3]).as_euler('zyx', degrees=True))
+
+            # compute pose as list
+            cartPose = np.empty(6)
+            cartPose[0:3] = bTo[0:3, 3] * 1000
+            cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("zyx", degrees=True)
+
+            print(cartPose)
+
+            # got to target cartesian pose
+            self.bot.write_cartesian_position(cartPose, blocking=False)
+            time.sleep(1)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+            
+            """
             # compute desired joint config
             curJointConfig = self.bot.read_current_joint_position()
             tarJointConfig = curJointConfig + self.diff2reach_pick
@@ -459,7 +501,7 @@ class IBVS_plug_pick(Node):
             time.sleep(2)
             while (self.bot.is_moving()):
                 time.sleep(0.1)
-
+            """
             # perform picking
             self.picked = True
 

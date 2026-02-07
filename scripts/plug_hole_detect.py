@@ -7,6 +7,7 @@ The script uses YOLO from Ultralytics pkg with fine-tuned weights to detect hole
 
 import cv2
 import math
+import pickle
 import numpy as np
 import pyrealsense2 as rs
 import matplotlib.cm as cm
@@ -39,11 +40,16 @@ class HoleDetector(Node):
         self.align = None
         self.K = None
         self.camDist = None
+        # realsense intrinsic's
+        K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb")
+        dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl", "rb")
+        self.K = pickle.load(K_fp)
+        self.camDist = np.float64(pickle.load(dist_fp))
         # realsense setup
-        self.configureRS()
+        # self.configureRS()
 
         # logging
-        self.get_logger().info(f"Camera device: {self.realsenseDev}")
+        # self.get_logger().info(f"Camera device: {self.realsenseDev}")
         self.get_logger().info(f"Image frame width: {self.frame_width}")
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
@@ -62,14 +68,37 @@ class HoleDetector(Node):
         self.cvBridge = CvBridge()
         self.tf_broadcaster = TransformBroadcaster(self)
         self.img_group = MutuallyExclusiveCallbackGroup()
-        self.img_publisher = self.create_publisher(Image, "/processed_image", 10, callback_group=self.img_group)
+        self.img_publisher = self.create_publisher(Image, "/processed_image_1", 10, callback_group=self.img_group)
         self.depthImg_publisher = self.create_publisher(Image, "/depth_image", 10, callback_group=self.img_group)
         self.matchPoints_publisher = self.create_publisher(Int64MultiArray, "/holes_coord", 10, callback_group=self.img_group)
+        self.rs_color_sub = self.create_subscription(Image, "/camera/camera/color/image_raw", self.rs_color_cb, 10, callback_group=self.img_group)
+        self.rs_depth_sub = self.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.rs_depth_cb, 10, callback_group=self.img_group)
 
         # image reader timer
-        self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
+        # self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
         self.img_processer_timer = self.create_timer(1/20, self.image_pub_timer, callback_group=self.img_group)
 
+    def rs_color_cb(self, msg):
+        try:
+            # acquire color image
+            if (msg is not None):
+                self.color_frame = self.cvBridge.imgmsg_to_cv2(msg, 'bgr8')
+            else:
+                self.color_frame = None
+        except Exception as e:
+            self.get_logger().warn(f"RS color image aquisition exception: {e}")
+            self.color_frame = None
+
+    def rs_depth_cb(self, msg):
+        try:
+            # acquire color image
+            if (msg is not None):
+                self.depth_frame = self.cvBridge.imgmsg_to_cv2(msg)
+            else:
+                self.depth_frame = None
+        except Exception as e:
+            self.get_logger().warn(f"RS depth image aquisition exception: {e}")
+            self.depth_frame = None
 
     def configureRS(self):
         """Function to configure  realsense device to perform image acquisition"""
@@ -304,7 +333,7 @@ def main():
     except Exception as e:
         print(f"Shutting down node:\nException: {e}")
         node.destroy_node()
-        node.pipeline.stop()
+        # node.pipeline.stop()
         # rclpy.shutdown()
 
 if __name__ == "__main__":

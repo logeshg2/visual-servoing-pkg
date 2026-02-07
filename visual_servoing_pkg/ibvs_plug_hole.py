@@ -116,7 +116,7 @@ class IBVS_plug_hole(Node):
         # ros2 comm variables
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
-        self.depthImg_sub = self.create_subscription(Image, "/depth_image", self.depthImg_cb, 10)
+        self.depthImg_sub = self.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.depthImg_cb, 10)
         self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10)
         self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
 

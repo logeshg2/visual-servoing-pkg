@@ -33,21 +33,19 @@ class ArucoNode(Node):
 
         # camera device reader in another thread
         self.latest_image = None
-        self.cam_obj = cv2.VideoCapture(self.cam_dev_id)
-        self.cam_obj.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-        self.cam_obj.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+        # self.cam_obj = cv2.VideoCapture(self.cam_dev_id)
+        # self.cam_obj.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+        # self.cam_obj.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
         self.frame_center = np.array([int(self.frame_width // 2), int(self.frame_height // 2)])
 
         # camera intrinsic's
         K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb")
         dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl", "rb")
         self.K = pickle.load(K_fp)
-        # self.K[0, 2] = 320.0            # calibration is little off (for fingers camera)
-        # self.K[1, 2] = 240.0
         self.camDist = np.float64(pickle.load(dist_fp))
 
         # logging
-        self.get_logger().info(f"Camera device id: {self.cam_dev_id}")
+        # self.get_logger().info(f"Camera device id: {self.cam_dev_id}")
         self.get_logger().info(f"Image frame width: {self.frame_width}")
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
@@ -75,9 +73,10 @@ class ArucoNode(Node):
         self.aruco_center_publisher = self.create_publisher(Int64MultiArray, "/aruco_center", 10)
         self.corner_pub = self.create_publisher(ArucoCorner, "/aruco_corners", 10)
         self.aruco_pose_pub = self.create_publisher(Pose, "/aruco_pose", 10)
+        self.rs_color_sub = self.create_subscription(Image, "/camera/camera/color/image_raw", self.rs_color_cb, 10, callback_group=self.img_group)
 
         # image reader timer
-        self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
+        # self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
         self.img_processer_timer = self.create_timer(1/20, self.image_pub_timer, callback_group=self.img_group)
 
 
@@ -191,6 +190,17 @@ class ArucoNode(Node):
 
         self.tf_broadcaster.sendTransform(tf)
 
+    def rs_color_cb(self, msg):
+        try:
+            # acquire color image
+            if (msg is not None):
+                self.latest_image = self.cvBridge.imgmsg_to_cv2(msg, 'bgr8')
+            else:
+                self.latest_image = None
+        except Exception as e:
+            self.get_logger().warn(f"RS image aquisition exception: {e}")
+            self.latest_image = None
+
     def image_reader_timer(self):
         # acquire latest image
         if (self.cam_obj.isOpened()):
@@ -203,6 +213,9 @@ class ArucoNode(Node):
             self.get_logger().warn(f"Camera object is not opened!")
 
     def image_pub_timer(self):
+        if (self.latest_image is None):
+            return
+
         # processed image and publish it
         self.process_image()
 

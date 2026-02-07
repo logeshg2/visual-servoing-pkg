@@ -434,28 +434,28 @@ class IBVS_plug_pick(Node):
             curPose = self.bot.read_current_cartesian_pose()
             bTe = np.eye(4) 
             bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
-            bTe[0:3, 0:3] = Rotation.from_euler("zyx", np.array(curPose[3:6]), degrees=True).as_matrix()
+            bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
             
             # aruco to grip pose
             aTo = np.eye(4)
-            aTo[0:3, 3] = np.array([0, 0.040, -0.040])
+            aTo[0:3, 3] = np.array([0.004, 0.042, -0.025])
+            aTo[0:3, 0:3] = Rotation.from_euler("xyz", (0, 0, -90), degrees=True).as_matrix()
             # camera to grip pose (self.arucoPose -> cTa)
             cTo = self.arucoPose @ aTo
 
             # ee to grip pose
             eTo = self.eTc @ cTo
-            eTo[2, 3] -= 0.130
+            eTo[2, 3] -= 0.110
             # eTo[0:3, 0:3] = np.eye(3)
 
             # base to object pose
             bTo = bTe @ eTo
 
-            print(Rotation.from_matrix(bTo[0:3, 0:3]).as_euler('zyx', degrees=True))
-
             # compute pose as list
             cartPose = np.empty(6)
             cartPose[0:3] = bTo[0:3, 3] * 1000
-            cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("zyx", degrees=True)
+            cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
+            cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
 
             print(cartPose)
 

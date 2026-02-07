@@ -459,12 +459,51 @@ class IBVS_plug_pick(Node):
 
             print(cartPose)
 
-            # got to target cartesian pose
+            # go to target cartesian pose
             self.bot.write_cartesian_position(cartPose, blocking=False)
-            time.sleep(1)
+            time.sleep(2)
             while (self.bot.is_moving()):
                 time.sleep(0.1)
             
+            # decrease z to pick (after aligning)
+            curPose = self.bot.read_current_cartesian_pose()
+            curPose[2] -= 15    # move 15 mm down
+            self.bot.write_cartesian_position(curPose, blocking=False)
+            time.sleep(2)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+
+            # move down -> check force -> if high than threshold -> go up again -> explore x-y coord -> if reached 15mm down -> then stop
+            # this did not work
+            """
+            fz_thresh = 100
+            hit = False
+            for step in range(1, 15):
+                fz = self.bot.read_force_sensor_values()[0]
+                print(fz)
+                if (fz >= fz_thresh):
+                    hit = True
+                    break
+                curPose = self.bot.read_current_cartesian_pose()
+                curPose[2] -= 1
+                # move the arm
+                self.bot.set_speed_percent(10)
+                self.bot.write_cartesian_position(curPose, blocking=False)
+                time.sleep(2)
+                while (self.bot.is_moving()):
+                    time.sleep(0.1)
+
+            if (not hit):
+                print("Arm reached the gripping position - no hit")
+            else:
+                print("Arm hit the target - going back")
+                self.bot.set_speed_percent(10)
+                self.bot.write_joint_pose(tempPose, blocking=False)
+                time.sleep(3)
+                while (self.bot.is_moving()):
+                    time.sleep(0.1)
+            """
+
             """
             # compute desired joint config
             curJointConfig = self.bot.read_current_joint_position()

@@ -457,8 +457,6 @@ class IBVS_plug_pick(Node):
             cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
             cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
 
-            print(cartPose)
-
             # go to target cartesian pose
             self.bot.write_cartesian_position(cartPose, blocking=False)
             time.sleep(2)
@@ -467,7 +465,20 @@ class IBVS_plug_pick(Node):
             
             # decrease z to pick (after aligning)
             curPose = self.bot.read_current_cartesian_pose()
-            curPose[2] -= 15    # move 15 mm down
+            curPose[2] -= 17    # move 17 mm down
+            self.bot.write_cartesian_position(curPose, blocking=False)
+            time.sleep(2)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+
+            # close gripper
+            time.sleep(1)
+            self.bot.air_gripper_control("close")
+            time.sleep(1)
+
+            # move up in z
+            curPose = self.bot.read_current_cartesian_pose()
+            curPose[2] += 40
             self.bot.write_cartesian_position(curPose, blocking=False)
             time.sleep(2)
             while (self.bot.is_moving()):

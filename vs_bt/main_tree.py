@@ -5,6 +5,7 @@
 import rclpy
 import py_trees
 from ros2_reader import ReadfromROS
+from ComDependencies.robot_controller import robot
 
 
 def setBlackboard(blackboard):
@@ -13,6 +14,7 @@ def setBlackboard(blackboard):
 def main():
     rclpy.init()
     node = rclpy.create_node("simple_node")
+    realRobot = robot("192.168.1.9")
 
     # initialize root
     root = py_trees.composites.Selector("root", memory=False)

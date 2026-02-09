@@ -27,7 +27,7 @@ import py_trees
 import pinocchio
 import numpy as np
 from scipy.spatial.transform import Rotation
-from ComDependencies.robot_controller import robot
+
 
 class ControlType:
     camVelCtrl = 0
@@ -38,15 +38,14 @@ class ControlType:
 
 
 class MoveArm(py_trees.behaviour.Behaviour):
-    def __init__(self, robot_ip: str="192.168.1.9", control_mode: ControlType=ControlType.camVelCtrl):
+    def __init__(self, realRobot, control_mode: ControlType=ControlType.camVelCtrl):
 
         self.name = "move_arm"
-        self.robotIp = robot_ip
         self.controlMode = control_mode
         super(MoveArm, self).__init__(self.name)
 
         # robot parameters
-        self.bot = None
+        self.bot = realRobot
         self.eeFrameId = None
         self.robotModel = None
         self.robotData = None
@@ -90,7 +89,6 @@ class MoveArm(py_trees.behaviour.Behaviour):
         """Setup robot arm movement parameters"""
         
         # hardware robot initialization
-        self.bot = robot(self.robotIp)
         self.bot.air_gripper_control('open')
         self.tracking_pose = np.array([60.0, 240.0, 120.0, 179.65, 0.69, 67.63])
 
@@ -140,56 +138,63 @@ class MoveArm(py_trees.behaviour.Behaviour):
     def update(self):
         """Perform robot motion based on controlMode"""
         
-        # read the current joint position
-        cur_joint_pose = self.bot.read_current_joint_position()
-        # current joint position (deg to rad) + J23 coupling
-        rad_arr = np.deg2rad(cur_joint_pose)
-        # remove coupling - J[3]' = J[3] + J[2]
-        rad_arr[2] = rad_arr[2] + rad_arr[1]
+        try:
+            # read the current joint position
+            cur_joint_pose = self.bot.read_current_joint_position()
+            # current joint position (deg to rad) + J23 coupling
+            rad_arr = np.deg2rad(cur_joint_pose)
+            # remove coupling - J[3]' = J[3] + J[2]
+            rad_arr[2] = rad_arr[2] + rad_arr[1]
 
-        # compute robot jacobian
-        robotJacobian = pinocchio.computeFrameJacobian(self.robotModel, self.robotData, np.array(rad_arr), self.eeFrameId)
+            # compute robot jacobian
+            robotJacobian = pinocchio.computeFrameJacobian(self.robotModel, self.robotData, np.array(rad_arr), self.eeFrameId)
 
-        # velocity mode's
-        # camVel - eeVel - jntVel (at end jntVel is computed)
-        if (self.controlMode == ControlType.camVelCtrl):
-            # camera velocity to ee velocity (using adjoint transformation - Ad_eTc)
-            self.camVel = self.camVel.reshape((6, 1))
-            self.eeVel = self.ADeTc @ self.camVel           # (6x1)
-            self.logger.info(f"{np.round(self.eeVel, 4)}")
+            # velocity mode's
+            # camVel - eeVel - jntVel (at end jntVel is computed)
+            if (self.controlMode == ControlType.camVelCtrl):
+                # camera velocity to ee velocity (using adjoint transformation - Ad_eTc)
+                self.camVel = self.camVel.reshape((6, 1))
+                self.eeVel = self.ADeTc @ self.camVel           # (6x1)
+                self.logger.info(f"{np.round(self.eeVel, 4)}")
+                
+                # ee velocity to joint velocity (using robot jacobian)
+                self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)
+
+            elif (self.controlMode == ControlType.eeVelCtrl):
+                # ee velocity to joint velocity (using robot jacobian)
+                self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)
             
-            # ee velocity to joint velocity (using robot jacobian)
-            self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)
+            elif (self.controlMode == ControlType.jntVelCtrl):
+                # do nothing - already in jnt velocity
+                pass
 
-        elif (self.controlMode == ControlType.eeVelCtrl):
-            # ee velocity to joint velocity (using robot jacobian)
-            self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)
+            # perform motion (or trigger movement)
+            if ((self.controlMode == ControlType.camVelCtrl or self.controlMode == ControlType.eeVelCtrl) or self.controlMode == ControlType.jntVelCtrl):
+                # integrate velocity to position
+                # compute target joint angle from target velocity
+                self.jntVel = self.jntVel.flatten()                                 # (6, )
+                target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=self.jntVel)
+
+                # adding coupling - J[3]' = J[3] - J[2]
+                target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
+                target_joint_pose = np.rad2deg(target_rad_arr).tolist()
+
+                # write register and sync-movement
+                self.bot.write_joint_pose(target_joint_pose, blocking=False)
+            
+            elif (self.controlMode == ControlType.jntPosCtrl):
+                # joint position control
+                self.bot.write_joint_pose(joint_position_array=self.tarJntPos, blocking=False)
+            
+            elif (self.controlMode == ControlType.cartPosCtrl):
+                # cartesian position control
+                self.bot.write_cartesian_position(coords=self.tarCartPos, blocking=False)
+            
+            return py_trees.common.Status.SUCCESS
         
-        elif (self.controlMode == ControlType.jntVelCtrl):
-            # do nothing - already in jnt velocity
-            pass
-
-        # perform motion (or trigger movement)
-        if ((self.controlMode == ControlType.camVelCtrl or self.controlMode == ControlType.eeVelCtrl) or self.controlMode == ControlType.jntVelCtrl):
-            # integrate velocity to position
-            # compute target joint angle from target velocity
-            self.jntVel = self.jntVel.flatten()                                 # (6, )
-            target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=self.jntVel)
-
-            # adding coupling - J[3]' = J[3] - J[2]
-            target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
-            target_joint_pose = np.rad2deg(target_rad_arr).tolist()
-
-            # write register and sync-movement
-            self.bot.write_joint_pose(target_joint_pose, blocking=False)
-        
-        elif (self.controlMode == ControlType.jntPosCtrl):
-            # joint position control
-            self.bot.write_joint_pose(joint_position_array=self.tarJntPos, blocking=False)
-        
-        elif (self.controlMode == ControlType.cartPosCtrl):
-            # cartesian position control
-            self.bot.write_cartesian_position(coords=self.tarCartPos, blocking=False)
+        except Exception as e:
+            self.logger.error(f"Exception with triggering motion: {e}")
+            return py_trees.common.Status.FAILURE
 
     def terminate(self):
         pass

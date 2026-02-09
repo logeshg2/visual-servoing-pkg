@@ -110,12 +110,6 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             self.triggered = True
         else:
             self.triggered = False
-        
-        # go to tracking position
-        # self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
-        # time.sleep(2)
-        # while (self.bot.is_moving()):
-        #     time.sleep(0.1)
 
         response.success = True
         response.message = "trigger successful"
@@ -143,7 +137,7 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             self.blackboard.set("curHoles", self.curHoles)
             self.blackboard.set("depthImg", self.depthImg)
 
-            return py_trees.common.Status.RUNNING
+            return py_trees.common.Status.SUCCESS
         except Exception as e:
             self.node.get_logger().warn(f"Exceptino while updating blackboard: {e}")
             return py_trees.common.Status.FAILURE

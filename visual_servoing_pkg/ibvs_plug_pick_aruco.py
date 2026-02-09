@@ -327,7 +327,7 @@ class IBVS_plug_pick(Node):
     
     def computeEEVel(self):
         # check aruco corners detection
-        if (self.cur_top_left is not None and self.cur_top_left[0] != -1):
+        if (self.arucoPose is not None and (self.cur_top_left is not None and self.cur_top_left[0] != -1)):
             # compute desired camera velocity
             self.curCamVel = self.computeCamVel()
             # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
@@ -429,7 +429,7 @@ class IBVS_plug_pick(Node):
             self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
         # perform picking (after convergence)
-        if (self.converged and not self.picked):
+        if (self.arucoPose is not None and (self.converged and not self.picked)):
             # compute current ee pose
             curPose = self.bot.read_current_cartesian_pose()
             bTe = np.eye(4) 
@@ -459,7 +459,7 @@ class IBVS_plug_pick(Node):
 
             # go to target cartesian pose
             self.bot.write_cartesian_position(cartPose, blocking=False)
-            time.sleep(2)
+            time.sleep(3)
             while (self.bot.is_moving()):
                 time.sleep(0.1)
             

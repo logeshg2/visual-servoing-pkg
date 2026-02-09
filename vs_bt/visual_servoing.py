@@ -10,7 +10,8 @@ TODO:
 1. Separate SDK - like package for visual servoing -> this behaviour is specificall for plug insertion (need to write generic one)
 2. need to write generic pixel vel computation + interaction matrix computation
 3. need to implement plug hole ibvs also (right now only aruco ibvs is implemented)
-4. 
+4. check the depth image -> using inverse of u,v currently
+5. 
 """
 
 
@@ -31,6 +32,8 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.cornerDepth = None
 
         # yolo plug hole variables
+        self.refDepth = None
+        self.desiredHoles = None
         self.curHoles = None
         self.depthImg = None
 
@@ -44,6 +47,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.currentIntMat_1 = None
         self.desiredIntMat_2 = None     # _2 - plug hole
         self.currentIntMat_2 = None
+        self.approxIntMat = None
 
         # camera calibration parameters
         self.K = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb"))
@@ -56,6 +60,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.servoAruco = True
         self.servoSocket = False
         self.camVel = None
+        self.pixelVel = None
         self.controlMode = ControlType.camVelCtrl
 
         self.blackboard = py_trees.blackboard.Blackboard()
@@ -71,9 +76,16 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         )
         self.arucoTar_Z = 0.163
         self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])       # [topLeft, topRight, bottomRight, bottomLeft]
+        
         # yolo holes
-
-
+        self.refDepth = 0.27
+        self.desiredHoles = np.array([
+            [337, 221],
+            [319, 245],
+            [356, 244],
+            [318, 266],
+            [359, 265]
+        ])
 
         # aruco parameters
         self.markerLength = 0.025
@@ -93,20 +105,47 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         """
         Function to compute desired aruco corner points interaction matrix + interaction matrix from plug hole
         This matrix computed will be used for `Approximation of Interaction Matrix`.
+        These desired interaction matrix are constant.
         """
 
         # aruco
-        # desire aruco points (corners) interaction matrix
-        p1_jac = self.computeInteractionMatrix(self.desArucoCorners[0][0], self.desArucoCorners[0][1], self.arucoTar_Z)
-        p2_jac = self.computeInteractionMatrix(self.desArucoCorners[1][0], self.desArucoCorners[1][1], self.arucoTar_Z)
-        p3_jac = self.computeInteractionMatrix(self.desArucoCorners[2][0], self.desArucoCorners[2][1], self.arucoTar_Z)
-        p4_jac = self.computeInteractionMatrix(self.desArucoCorners[3][0], self.desArucoCorners[3][1], self.arucoTar_Z)
-        # points jacobian (for all for points) - 8x6 matrix
-        # desired points interaction matrix
-        self.desiredIntMat_1 = np.vstack([p1_jac, p2_jac, p3_jac, p4_jac])
+        # desired points interaction matrix (aruco) - 8x6 matrix
+        tempLst = []
+        for u, v in self.desArucoCorners:
+            tempLst.append(
+                self.computeInteractionMatrix(u, v, self.arucoTar_Z)
+            )
+        self.desiredIntMat_1 = np.vstack(tempLst)
 
         # plug_hole
-        ##
+        # desired points interaction matrix (socket hole) - 10x6 matrix (5 holes)
+        tempLst = []
+        for u, v in self.desiredHoles:
+            tempLst.append(
+                self.computeInteractionMatrix(u, v, self.refDepth)
+            )
+        self.desiredIntMat_2 = np.vstack(tempLst)
+
+    def computeCurrentInteractionMat(self):
+        """Function to compute current image jacobian matrix based on the feature points detected."""
+
+        if (self.servoAruco):
+            # aruco corners feature jacobian
+            tempLst = []
+            for (u, v), Z in zip(self.curArucoCorners, self.cornerDepth):
+                tempLst.append(
+                    self.computeInteractionMatrix(u, v, Z)
+                )
+            self.currentIntMat_1 = np.vstack(tempLst)
+        elif (self.servoSocket):
+            # socket holes feature jacobian
+            # for ref point depth - using current depth frame
+            tempLst = []
+            for u, v in self.curHoles:
+                tempLst.append(
+                    self.computeInteractionMatrix(u, v, self.depthImg[v, u])
+                )
+            self.currentIntMat_2 = np.vstack(tempLst)
 
     def computeInteractionMatrix(self, u, v, Z):
         """
@@ -162,7 +201,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         pix_vel = np.subtract(np.array(cur_xy), np.array(des_xy))           # difference of points in image plane
         return pix_vel
 
-    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0, pixelVel):
+    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0):
         """
         Function to compute adaptive gain based on the error vector and other paramters
         This approach was inspired from `ViSP team`.
@@ -181,7 +220,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         
         # compute infinite norm of error vector (i.e., getting abs max of error vector)
         x_norm = 0.0
-        for err in pixelVel:
+        for err in self.pixelVel:
             abs_err = abs(err[0])
             if (abs_err > x_norm):
                 x_norm = abs_err 
@@ -224,37 +263,53 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             # compute depth corners
             self.computeCornerDepth()
 
-        # compute pixel velocity
-        top_left_pix_vel = self.computeImgPointVel(self.desArucoCorners[0], self.curArucoCorners[0])
-        top_right_pix_vel = self.computeImgPointVel(self.desArucoCorners[1], self.curArucoCorners[1])
-        bottom_right_pix_vel = self.computeImgPointVel(self.desArucoCorners[2], self.curArucoCorners[2])
-        bottom_left_pix_vel = self.computeImgPointVel(self.desArucoCorners[3], self.curArucoCorners[3])
-        # flatten pixel velocities (here - 8x1 vector)
-        pixelVel = np.array([top_left_pix_vel.flatten(), top_right_pix_vel.flatten(), bottom_right_pix_vel.flatten(), bottom_left_pix_vel.flatten()])
-        pixelVel = np.array([pixelVel.flatten()]).reshape((8, 1))    # 8x1
+            # compute pixel velocity
+            tempLst = []
+            for refPoint, curPoint in zip(self.desArucoCorners, self.curArucoCorners):
+                tempLst.append(
+                    self.computeImgPointVel(refPoint, curPoint).flatten().tolist()
+                )
+            self.pixelVel = np.array(tempLst).reshape((4 * 2), 1)     # 8x1
 
-        # compute interation matrix (combain all for points interation matrix)
-        top_left_jacob = self.computeInteractionMatrix(self.curArucoCorners[0][0], self.curArucoCorners[0][1], self.cornerDepth[0])
-        top_right_jacob = self.computeInteractionMatrix(self.curArucoCorners[1][0], self.curArucoCorners[1][1], self.cornerDepth[1])
-        bottom_right_jacob = self.computeInteractionMatrix(self.curArucoCorners[2][0], self.curArucoCorners[2][1], self.cornerDepth[2])
-        bottom_left_jacob = self.computeInteractionMatrix(self.curArucoCorners[3][0], self.curArucoCorners[3][1], self.cornerDepth[3])
-        self.currentIntMat_1 = np.vstack([top_left_jacob, top_right_jacob, bottom_right_jacob, bottom_left_jacob])
+            # compute interation matrix
+            self.computeCurrentInteractionMat()
 
-        # Approximation of Interaction Matrix   (8x6)
-        approxIntMat = (self.currentIntMat_1 + self.desiredIntMat_1) / 2
+            # Approximation of Interaction Matrix - (8x6)
+            self.approxIntMat = (self.currentIntMat_1 + self.desiredIntMat_1) / 2
+
+        elif (self.servoSocket):
+            # servo on socket holes
+
+            # compute pixel velocity
+            tempLst = []
+            self.curHoles = self.curHoles.reshape((5, 2))
+            for refPoint, curPoint in zip(self.desiredHoles, self.curHoles):
+                tempLst.extend(
+                    self.computeImgPointVel(refPoint, curPoint).flatten().tolist()
+                )
+            self.pixelVel = np.array(tempLst).reshape(((5 * 2), 1))     # 10x1
+
+            # compute current image feature jacobian matrix
+            self.computeCurrentInteractionMat()
+
+            # Approximation of Interaction Matrix - (10x6)
+            self.approxIntMat = (self.currentIntMat_2 + self.desiredIntMat_2) / 2
+
 
         # Adaptive gain (lambda_adapt)
-        self.setAdaptiveGain(0.5, 0.3, 30.0, pixelVel)           # default - [1.666, 0.666, 1.666] 
+        self.setAdaptiveGain(0.5, 0.3, 30.0)                # default - [1.666, 0.666, 1.666] 
         # tuning adaptive gain parameter using constant lambda
         # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
 
         # compute camVel 
-        self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(approxIntMat) @ pixelVel)        # (6x1) = (6x8) @ (8x1)
+        self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(self.approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
         self.camVel = self.camVel.flatten()     # (6,)
 
         # update blackboard
         self.blackboard.set("controlMode", ControlType.camVelCtrl)
         self.blackboard.set("camVel", self.camVel)
+
+        return py_trees.common.Status.SUCCESS
 
     def terminate(self):
         pass

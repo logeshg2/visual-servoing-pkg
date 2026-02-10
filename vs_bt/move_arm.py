@@ -105,6 +105,7 @@ class MoveArm(py_trees.behaviour.Behaviour):
         self.tarCartPos = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
         # set default values to blackboard
+        self.blackboard.set("eTc", self.eTc)
         self.blackboard.set("controlMode", self.controlMode)
         self.blackboard.set("camVel", self.camVel)
         self.blackboard.set("eeVel", self.eeVel)

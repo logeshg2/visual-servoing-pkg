@@ -4,12 +4,20 @@
 
 import rclpy
 import py_trees
+import numpy as np
 from ros2_reader import ReadfromROS
+from check_motion import CheckMovement
+from move_arm import MoveArm, ControlType
+from visual_servoing import VisualServoing
 from ComDependencies.robot_controller import robot
 
 
+tracking_pose = np.array([60.0, 240.0, 120.0, 179.65, 0.69, 67.63])
+
 def setBlackboard(blackboard):
-    pass
+    """Initialize default parameters in blackboard"""
+    
+    blackboard.set("tracking_pose", tracking_pose)
 
 def main():
     rclpy.init()
@@ -19,6 +27,10 @@ def main():
     # initialize root
     root = py_trees.composites.Selector("root", memory=False)
     read_from_ros = ReadfromROS(node)
+    check_movement = CheckMovement(realRobot)
+    visual_servoing = VisualServoing()
+    move_arm = MoveArm(realRobot, ControlType.camVelCtrl)
+    # construct root + tree
     root.add_child(read_from_ros)
 
     # initialize tree

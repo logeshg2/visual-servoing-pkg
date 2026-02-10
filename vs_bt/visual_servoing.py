@@ -57,8 +57,9 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.lambdaVar = None
         self.triggered = False
         self.converged = False
-        self.servoAruco = True
+        self.servoAruco = False
         self.servoSocket = False
+        self.moveToTracking = False
         self.camVel = None
         self.pixelVel = None
         self.controlMode = ControlType.camVelCtrl
@@ -243,6 +244,10 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.curArucoCorners[1] = self.blackboard.get("cur_top_right")
         self.curArucoCorners[2] = self.blackboard.get("cur_bottom_right")
         self.curArucoCorners[3] = self.blackboard.get("cur_bottom_left")
+        self.converged = self.blackboard.get("converged")
+        self.servoAruco = self.blackboard.get("servoAruco")
+        self.servoSocket = self.blackboard.get("servoSocket")
+        self.moveToTracking = self.blackboard.get("moveToTracking")
 
         # cam velocity based control
         self.controlMode = ControlType.camVelCtrl
@@ -251,15 +256,20 @@ class VisualServoing(py_trees.behaviour.Behaviour):
     def update(self):
         """Compute and perform IBVS"""
 
+        # no servoing while moving to tracking pose
+        if (self.moveToTracking):
+            return py_trees.common.Status.SUCCESS
+
         # if not triggered (wait)
         if (not self.triggered):
-            return py_trees.common.Status.SUCCESS
+            return py_trees.common.Status.FAILURE
         
         if (self.servoAruco and not self.arucoPose):
+            self.logger.warning("Aruco pose is none")
             return py_trees.common.Status.FAILURE
         
         # servo on aruco
-        if (self.arucoPose):
+        if (self.servoAruco and self.arucoPose is not None):
             # compute depth corners
             self.computeCornerDepth()
 
@@ -277,7 +287,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             # Approximation of Interaction Matrix - (8x6)
             self.approxIntMat = (self.currentIntMat_1 + self.desiredIntMat_1) / 2
 
-        elif (self.servoSocket):
+        elif (self.servoSocket and self.curHoles is not None):
             # servo on socket holes
 
             # compute pixel velocity
@@ -304,6 +314,12 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         # compute camVel 
         self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(self.approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
         self.camVel = self.camVel.flatten()     # (6,)
+
+        # check convergence
+        if (np.all(self.camVel < 0.0004)):
+            self.converged = True
+            self.blackboard.set("converged", self.converged)
+            return py_trees.common.Status.FAILURE
 
         # update blackboard
         self.blackboard.set("controlMode", ControlType.camVelCtrl)

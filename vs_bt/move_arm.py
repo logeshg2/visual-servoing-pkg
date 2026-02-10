@@ -22,6 +22,7 @@ TODO:
 """
 
 
+import time
 import pickle
 import py_trees
 import pinocchio
@@ -156,7 +157,7 @@ class MoveArm(py_trees.behaviour.Behaviour):
                 # camera velocity to ee velocity (using adjoint transformation - Ad_eTc)
                 self.camVel = self.camVel.reshape((6, 1))
                 self.eeVel = self.ADeTc @ self.camVel           # (6x1)
-                self.logger.info(f"{np.round(self.eeVel, 4)}")
+                self.logger.info(f"{np.round(self.eeVel.flatten(), 4)}")
                 
                 # ee velocity to joint velocity (using robot jacobian)
                 self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)
@@ -186,16 +187,18 @@ class MoveArm(py_trees.behaviour.Behaviour):
             elif (self.controlMode == ControlType.jntPosCtrl):
                 # joint position control
                 self.bot.write_joint_pose(joint_position_array=self.tarJntPos, blocking=False)
+                time.sleep(1)
             
             elif (self.controlMode == ControlType.cartPosCtrl):
                 # cartesian position control
                 self.bot.write_cartesian_position(coords=self.tarCartPos, blocking=False)
-            
+                time.sleep(1)
+
             return py_trees.common.Status.SUCCESS
         
         except Exception as e:
             self.logger.error(f"Exception with triggering motion: {e}")
             return py_trees.common.Status.FAILURE
 
-    def terminate(self):
-        pass
+    # def terminate(self):
+    #     pass

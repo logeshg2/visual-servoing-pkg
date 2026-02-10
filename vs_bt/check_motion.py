@@ -19,7 +19,7 @@ class CheckMovement(py_trees.behaviour.Behaviour):
         self.blackboard = py_trees.blackboard.Blackboard()
 
     def setup(self):
-        self.controlMode = self.blackboard.get("controlMode")
+        self.blackboard.set("controlMode", ControlType.camVelCtrl)
 
     def initialise(self):
         self.controlMode = self.blackboard.get("controlMode")
@@ -38,5 +38,5 @@ class CheckMovement(py_trees.behaviour.Behaviour):
         # NOTE: for velocity  controlled modes - we no need to wait for motion to complete
         return py_trees.common.Status.SUCCESS
 
-    def terminate(self):
-        pass
+    # def terminate(self):
+    #     pass

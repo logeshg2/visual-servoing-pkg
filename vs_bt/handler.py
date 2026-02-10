@@ -89,6 +89,12 @@ class Handler(py_trees.behaviour.Behaviour):
                     cartPose[0:3] = bTo[0:3, 3] * 1000
                     cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
                     cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
+                    print(cartPose)
+                    print()
+                    print(self.eTc)
+                    print()
+                    print(bTo)
+                    exit(0)
 
                     # perform motion
                     self.blackboard.set("tarCartPos", cartPose)
@@ -158,8 +164,8 @@ class Handler(py_trees.behaviour.Behaviour):
         if ((self.triggered and not self.moveToTracking) and (not self.servoAruco and not self.servoSocket)):
             # move to tracking position (initial movement)
             tracking_pos = self.blackboard.get("tracking_pose")
-            self.blackboard.set("controlMode", ControlType.jntPosCtrl)
-            self.blackboard.set("tarJntPos", tracking_pos)
+            self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+            self.blackboard.set("tarCartPos", tracking_pos)
             self.blackboard.set("moveToTracking", True)
             
             return py_trees.common.Status.SUCCESS
@@ -198,5 +204,5 @@ class Handler(py_trees.behaviour.Behaviour):
             # not defined
             return py_trees.common.Status.FAILURE
 
-    def terminate(self):
-        pass
+    # def terminate(self):
+    #     pass

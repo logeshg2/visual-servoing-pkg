@@ -316,6 +316,9 @@ class HoleDetector(Node):
             msg1.data = [-1]
             self.matchPoints_publisher.publish(msg1)
 
+        if (self.color_frame is None):
+            returnx
+
         # publish processed image
         msg = self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")
         self.img_publisher.publish(msg)
@@ -327,12 +330,12 @@ class HoleDetector(Node):
 def main():
     rclpy.init()
 
-    try:
-        node = HoleDetector()
-        rclpy.spin(node)
-    except Exception as e:
-        print(f"Shutting down node:\nException: {e}")
-        node.destroy_node()
+    # try:
+    node = HoleDetector()
+    rclpy.spin(node)
+    # except Exception as e:
+        # print(f"Shutting down node:\nException: {e}")
+        # node.destroy_node()
         # node.pipeline.stop()
         # rclpy.shutdown()
 

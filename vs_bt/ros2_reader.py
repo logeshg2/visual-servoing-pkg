@@ -142,5 +142,5 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             self.node.get_logger().warn(f"Exceptino while updating blackboard: {e}")
             return py_trees.common.Status.FAILURE
 
-    def terminate(self):
-        pass
+    # def terminate(self):
+    #     pass

@@ -63,18 +63,31 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.camVel = None
         self.pixelVel = None
         self.controlMode = ControlType.camVelCtrl
+        self.performAlignment = False
+
+        # velocity filter
+        self.noPoints = 10
+        self.maFilterArr = np.array([
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+            [0.0 for i in range(self.noPoints)],
+        ])
+        self.maIdx = 0
 
         self.blackboard = py_trees.blackboard.Blackboard()
 
     def setup(self):
         # target feature points
         # aruco
-        self.desArucoCorners = np.array(
+        self.desArucoCorners = np.array([
             [270, 196],
             [363, 196],
             [363, 288],
             [270, 289]
-        )
+        ])
         self.arucoTar_Z = 0.163
         self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])       # [topLeft, topRight, bottomRight, bottomLeft]
         
@@ -232,6 +245,23 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         # set adaptive gain to `self.lambdaVar`
         self.lambdaVar = lam_adapt
 
+    def maVelFilter(self, camVels):
+        """
+        Function to perform filtering on computed velocity.
+        using simple `Moving Average` filter approach here. 
+        """
+        # TODO: use matrix multiplication to do this - instead of brute for approach
+
+        fVels = np.array([0.0 for i in range(6)])
+        for idx in range(6):    # iterate over joints
+            self.maFilterArr[idx][self.maIdx] = camVels[idx]
+            fVels[idx] = np.sum(self.maFilterArr[idx]) / self.noPoints
+        
+        self.maIdx += 1
+        self.maIdx %= self.noPoints
+
+        return fVels
+
     def initialise(self):
         """Reading dynamic variables and parameters from blackboard"""
 
@@ -248,24 +278,28 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.servoAruco = self.blackboard.get("servoAruco")
         self.servoSocket = self.blackboard.get("servoSocket")
         self.moveToTracking = self.blackboard.get("moveToTracking")
+        self.performAlignment = self.blackboard.get("performAlignment")
 
         # cam velocity based control
-        self.controlMode = ControlType.camVelCtrl
-        self.blackboard.set("controlMode", self.controlMode)
+        # self.controlMode = ControlType.camVelCtrl
+        # self.blackboard.set("controlMode", self.controlMode)
 
     def update(self):
         """Compute and perform IBVS"""
 
         # no servoing while moving to tracking pose
-        if (self.moveToTracking):
+        if (self.moveToTracking or self.performAlignment):
             return py_trees.common.Status.SUCCESS
 
         # if not triggered (wait)
         if (not self.triggered):
             return py_trees.common.Status.FAILURE
         
-        if (self.servoAruco and not self.arucoPose):
+        if (self.servoAruco and self.arucoPose is None):
             self.logger.warning("Aruco pose is none")
+            self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self.blackboard.set("controlMode", ControlType.camVelCtrl)
+            self.blackboard.set("camVel", self.camVel)
             return py_trees.common.Status.FAILURE
         
         # servo on aruco
@@ -305,6 +339,9 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             # Approximation of Interaction Matrix - (10x6)
             self.approxIntMat = (self.currentIntMat_2 + self.desiredIntMat_2) / 2
 
+        else:
+            # do nothing
+            return py_trees.common.Status.FAILURE
 
         # Adaptive gain (lambda_adapt)
         self.setAdaptiveGain(0.5, 0.3, 30.0)                # default - [1.666, 0.666, 1.666] 
@@ -314,6 +351,9 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         # compute camVel 
         self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(self.approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
         self.camVel = self.camVel.flatten()     # (6,)
+
+        # velocity filter
+        self.camVel = self.maVelFilter(self.camVel)
 
         # check convergence
         if (np.all(self.camVel < 0.0004)):
@@ -327,5 +367,5 @@ class VisualServoing(py_trees.behaviour.Behaviour):
 
         return py_trees.common.Status.SUCCESS
 
-    def terminate(self):
-        pass
+    # def terminate(self):
+    #     pass

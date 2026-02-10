@@ -5,6 +5,7 @@
 import rclpy
 import py_trees
 import numpy as np
+from handler import Handler
 from ros2_reader import ReadfromROS
 from check_motion import CheckMovement
 from move_arm import MoveArm, ControlType
@@ -25,13 +26,14 @@ def main():
     realRobot = robot("192.168.1.9")
 
     # initialize root
-    root = py_trees.composites.Selector("root", memory=False)
+    root = py_trees.composites.Sequence("root", memory=False)
     read_from_ros = ReadfromROS(node)
+    course_handler = Handler(realRobot)
     check_movement = CheckMovement(realRobot)
     visual_servoing = VisualServoing()
     move_arm = MoveArm(realRobot, ControlType.camVelCtrl)
     # construct root + tree
-    root.add_child(read_from_ros)
+    root.add_children([read_from_ros, check_movement, course_handler, visual_servoing, move_arm])
 
     # initialize tree
     behaviour_tree = py_trees.trees.BehaviourTree(root=root)

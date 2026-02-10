@@ -317,7 +317,7 @@ class HoleDetector(Node):
             self.matchPoints_publisher.publish(msg1)
 
         if (self.color_frame is None):
-            returnx
+            return
 
         # publish processed image
         msg = self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")

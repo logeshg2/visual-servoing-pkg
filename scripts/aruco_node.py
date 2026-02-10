@@ -77,7 +77,7 @@ class ArucoNode(Node):
 
         # image reader timer
         # self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
-        self.img_processer_timer = self.create_timer(1/20, self.image_pub_timer, callback_group=self.img_group)
+        self.img_processer_timer = self.create_timer(1/50, self.image_pub_timer)
 
 
     def plotCornersDepth(self, trans, rvec, objecPoints):

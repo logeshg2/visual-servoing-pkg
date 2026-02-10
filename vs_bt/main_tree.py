@@ -50,7 +50,7 @@ def main():
 
     try:
         behaviour_tree.tick_tock(
-            period_ms=100,
+            period_ms=5,
             number_of_iterations=py_trees.trees.CONTINUOUS_TICK_TOCK,
             pre_tick_handler=None,
             post_tick_handler=print_tree,

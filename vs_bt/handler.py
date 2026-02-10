@@ -54,6 +54,9 @@ class Handler(py_trees.behaviour.Behaviour):
     def update(self):
         """Trigger operation | movements"""
 
+        if ((self.servoAruco and self.arucoPose is None) and not self.performAlignment):
+            return py_trees.common.Status.FAILURE
+
         if (not self.triggered):
             return py_trees.common.Status.FAILURE
         elif ((self.triggered and not self.converged) and (self.servoAruco or self.servoSocket)):
@@ -89,12 +92,6 @@ class Handler(py_trees.behaviour.Behaviour):
                     cartPose[0:3] = bTo[0:3, 3] * 1000
                     cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
                     cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
-                    print(cartPose)
-                    print()
-                    print(self.eTc)
-                    print()
-                    print(bTo)
-                    exit(0)
 
                     # perform motion
                     self.blackboard.set("tarCartPos", cartPose)
@@ -141,8 +138,8 @@ class Handler(py_trees.behaviour.Behaviour):
                 elif (self.opr_count == 4):
                     # go back to tracking position
                     tracking_pos = self.blackboard.get("tracking_pose")
-                    self.blackboard.set("controlMode", ControlType.jntPosCtrl)
-                    self.blackboard.set("tarJntPos", tracking_pos)
+                    self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+                    self.blackboard.set("tarCartPos", tracking_pos)
 
                     self.opr_count += 1
 
@@ -189,6 +186,7 @@ class Handler(py_trees.behaviour.Behaviour):
             self.servoSocket = True
             self.servoAruco = False
             self.blackboard.set("servoSocket", self.servoSocket)
+            self.blackboard.set("servoAruco", self.servoAruco)
             self.blackboard.set("controlMode", ControlType.camVelCtrl)
 
             return py_trees.common.Status.SUCCESS

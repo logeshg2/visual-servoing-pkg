@@ -21,7 +21,7 @@ TODO:
 5. 
 """
 
-
+import csv
 import time
 import pickle
 import py_trees
@@ -85,6 +85,8 @@ class MoveArm(py_trees.behaviour.Behaviour):
 
         self.blackboard = py_trees.blackboard.Blackboard()
         self.logger = py_trees.logging.Logger()
+
+        self.writer = csv.writer(open("/home/logesh/Desktop/temp.csv", "w"))
 
     def setup(self):
         """Setup robot arm movement parameters"""
@@ -158,6 +160,7 @@ class MoveArm(py_trees.behaviour.Behaviour):
                 self.camVel = self.camVel.reshape((6, 1))
                 self.eeVel = self.ADeTc @ self.camVel           # (6x1)
                 self.logger.info(f"{np.round(self.eeVel.flatten(), 4)}")
+                self.writer.writerow(self.eeVel.flatten())
                 
                 # ee velocity to joint velocity (using robot jacobian)
                 self.jntVel = (np.linalg.pinv(robotJacobian) @ self.eeVel)          # (6x1)

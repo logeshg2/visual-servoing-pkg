@@ -58,7 +58,7 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         self.aruco_corner_sub = self.node.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.data_read_group)
         self.aruco_pose_sub = self.node.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.data_read_group)
         self.matchPoints_sub = self.node.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
-        self.depthImg_sub = self.node.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.depthImg_cb, 10, callback_group=self.data_read_group)
+        self.depthImg_sub = self.node.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.depthImg_cb, 10)
 
         # ros2 service
         self.trigger_srv = self.node.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)

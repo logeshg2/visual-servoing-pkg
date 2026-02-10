@@ -295,11 +295,12 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         if (not self.triggered):
             return py_trees.common.Status.FAILURE
         
-        if (self.servoAruco and self.arucoPose is None):
+        if (self.servoAruco and (self.arucoPose is None or self.curArucoCorners[0][0] == -1)):
             self.logger.warning("Aruco pose is none")
-            self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-            self.blackboard.set("controlMode", ControlType.camVelCtrl)
-            self.blackboard.set("camVel", self.camVel)
+            return py_trees.common.Status.FAILURE
+        
+        if (self.servoSocket and (self.depthImg is None)):
+            self.logger.warning("Depth image is none")
             return py_trees.common.Status.FAILURE
         
         # servo on aruco
@@ -349,6 +350,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
 
         # compute camVel 
+        # print(np.round(self.curArucoCorners.flatten(), 4)); exit(0)
         self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(self.approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
         self.camVel = self.camVel.flatten()     # (6,)
 
@@ -356,7 +358,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.camVel = self.maVelFilter(self.camVel)
 
         # check convergence
-        if (np.all(self.camVel < 0.0004)):
+        if (np.max(np.abs(self.pixelVel.flatten())) < 0.006):
             self.converged = True
             self.blackboard.set("converged", self.converged)
             return py_trees.common.Status.FAILURE

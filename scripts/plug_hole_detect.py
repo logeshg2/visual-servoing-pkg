@@ -18,6 +18,7 @@ import rclpy
 from rclpy.node import Node
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
+from geometry_msgs.msg import Pose
 from tf2_ros import TransformBroadcaster
 from std_msgs.msg import Int64MultiArray
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -55,6 +56,7 @@ class HoleDetector(Node):
 
         # yolo hole detector model setup
         self.holes = None
+        self.holesPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/hole_best.pt")
         self.desiredHoles = np.array([
             [337, 221],
@@ -62,6 +64,14 @@ class HoleDetector(Node):
             [356, 244],
             [318, 266],
             [359, 265]
+        ])
+        # object points
+        self.object_points = np.array([
+            # [0.0, -0.01075, 0],
+            [-0.00825, 0.0, 0],
+            [0.00825, 0.0, 0],
+            [-0.00955, 0.01075, 0],
+            [0.00955, 0.01075, 0]
         ])
 
         # ros2 communication variables
@@ -73,6 +83,7 @@ class HoleDetector(Node):
         self.matchPoints_publisher = self.create_publisher(Int64MultiArray, "/holes_coord", 10, callback_group=self.img_group)
         self.rs_color_sub = self.create_subscription(Image, "/camera/camera/color/image_raw", self.rs_color_cb, 10, callback_group=self.img_group)
         self.rs_depth_sub = self.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.rs_depth_cb, 10, callback_group=self.img_group)
+        self.holesPose_pub = self.create_publisher(Pose, "/holes_pose", 10)
 
         # image reader timer
         # self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
@@ -273,14 +284,28 @@ class HoleDetector(Node):
             if (len(xywh_arr) == 5):
                 # solve correspondence problem
                 self.solveCorrespondence(xywh_arr)
+
+                # compute pose
+                image_points = np.float64(self.holes[1:, :])        # remove point 1
+                _, rvec, tvec, inliers = cv2.solvePnPRansac(self.object_points, image_points, self.K, self.camDist)
+                if (_):
+                    cv2.drawFrameAxes(self.color_frame, self.K, self.camDist, rvec, tvec, 0.05, 3)
+                    rvec = rvec.flatten()
+                    tvec = tvec.flatten()
+                    quat = Rotation.from_rotvec(rvec).as_quat()
+                    self.holesPose = {'tvec': tvec, 'quat': quat}
+                else:
+                    self.holesPose = None
             else:
                 # no enough point to compute
                 self.holes = None
+                self.holesPose = None
                 pass
 
         except Exception as e:
             self.get_logger().warn(f"Exception occured: {e}")
             self.holes = None
+            self.holesPose = None
 
     def image_reader_timer(self):
         try:
@@ -311,10 +336,30 @@ class HoleDetector(Node):
             msg1 = Int64MultiArray()
             msg1.data = self.holes.flatten().tolist()
             self.matchPoints_publisher.publish(msg1)
+
+            # hole pose
+            if (self.holesPose is not None):
+                msg = Pose()
+                msg.position.x = self.holesPose['tvec'][0]
+                msg.position.y = self.holesPose['tvec'][1]
+                msg.position.z = self.holesPose['tvec'][2]
+                msg.orientation.x = self.holesPose['quat'][0]
+                msg.orientation.y = self.holesPose['quat'][1]
+                msg.orientation.z = self.holesPose['quat'][2]
+                msg.orientation.w = self.holesPose['quat'][3]
+                self.holesPose_pub.publish(msg)
+            else:
+                msg = Pose()
+                msg.position.x = -1.0
+                self.holesPose_pub.publish(msg)
         else:
             msg1 = Int64MultiArray()
             msg1.data = [-1]
             self.matchPoints_publisher.publish(msg1)
+
+            msg = Pose()
+            msg.position.x = -1.0
+            self.holesPose_pub.publish(msg)
 
         if (self.color_frame is None):
             return

@@ -33,6 +33,7 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         self.cur_bottom_left = None
         self.curHoles = None
         self.depthImg = None
+        self.holesPose = None
         self.triggered = False
         self.data_read_group = ReentrantCallbackGroup()
         self.cv_bridge = CvBridge()
@@ -53,12 +54,14 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         # plug hole
         self.blackboard.set("curHoles", self.curHoles)
         self.blackboard.set("depthImg", self.depthImg)
+        self.blackboard.set("holesPose", self.holesPose)
 
         # ros2 subscription
         self.aruco_corner_sub = self.node.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.data_read_group)
         self.aruco_pose_sub = self.node.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.data_read_group)
         self.matchPoints_sub = self.node.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
         self.depthImg_sub = self.node.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.depthImg_cb, 10)
+        self.holes_pose_sub = self.node.create_subscription(Pose, "/holes_pose", self.socket_pose_cb, 10, callback_group=self.data_read_group)
 
         # ros2 service
         self.trigger_srv = self.node.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
@@ -84,6 +87,16 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             self.arucoPose[0:3, 0:3] = rotm
         else:
             self.arucoPose = None
+
+    def socket_pose_cb(self, msg):
+        if (msg.position is not None and msg.position.x != -1.0):
+            # pose extraction
+            self.holesPose = np.eye(4)
+            self.holesPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
+            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
+            self.holesPose[0:3, 0:3] = rotm
+        else:
+            self.holesPose = None
 
     def matched_points_cb(self, msg):
         """Callback function to extract matched points from the ros2 custom message"""
@@ -136,6 +149,7 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             # plug hole
             self.blackboard.set("curHoles", self.curHoles)
             self.blackboard.set("depthImg", self.depthImg)
+            self.blackboard.set("holesPose", self.holesPose)
 
             return py_trees.common.Status.SUCCESS
         except Exception as e:

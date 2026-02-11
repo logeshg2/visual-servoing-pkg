@@ -31,11 +31,16 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.arucoTar_Z = None
         self.cornerDepth = None
 
-        # yolo plug hole variables
+        # yolo socket hole variables
         self.refDepth = None
         self.desiredHoles = None
         self.curHoles = None
         self.depthImg = None
+
+        # socket holes parameters
+        self.holesPose = None
+        self.holesDepth = None
+        self.socket_object_points = np.empty((5, 3))
 
         # aruco parameters
         self.arucoPose = None
@@ -93,6 +98,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         
         # yolo holes
         self.refDepth = 0.27
+        self.holesDepth = np.array([-1.0, -1.0, -1.0, -1.0, -1.0])
         self.desiredHoles = np.array([
             [337, 221],
             [319, 245],
@@ -108,6 +114,15 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             [self.markerLength / 2, -self.markerLength / 2, 0],
             [self.markerLength / 2, self.markerLength / 2, 0],
             [-self.markerLength / 2, self.markerLength / 2, 0]
+        ])
+
+        # socket holes parameters
+        self.socket_object_points = np.array([
+            [0.0, -0.01075, 0],                     # NOTE: in here we need the pose of this point (1) - in pose estimation we omit this
+            [-0.00825, 0.0, 0],
+            [0.00825, 0.0, 0],
+            [-0.00955, 0.01075, 0],
+            [0.00955, 0.01075, 0]
         ])
 
         # desired interaction computation (constant)
@@ -153,11 +168,11 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             self.currentIntMat_1 = np.vstack(tempLst)
         elif (self.servoSocket):
             # socket holes feature jacobian
-            # for ref point depth - using current depth frame
+            # for ref point depth - using current depth frame   (deprecated now)
             tempLst = []
-            for u, v in self.curHoles:
+            for (u, v), Z in zip(self.curHoles, self.holesDepth):
                 tempLst.append(
-                    self.computeInteractionMatrix(u, v, self.depthImg[v, u])
+                    self.computeInteractionMatrix(u, v, Z)
                 )
             self.currentIntMat_2 = np.vstack(tempLst)
 
@@ -197,6 +212,18 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             cTp = cTa @ aTp                     # camera to corner point pose
             # store depth (in camera frame)
             self.cornerDepth[idx] = cTp[2, 3]   # depth (Z value) 
+
+    def computeHolesDepth(self):
+        """ Function to compute depth (Z) from camera frame to the socket holes """
+        
+        # depth of the socket holes are determined using object points
+        for idx, pt in enumerate(self.socket_object_points):
+            cTs = self.holesPose                # camera to socket pose
+            sTp = np.eye(4)                     # sockey to hole point pose
+            sTp[0:3, 3] = pt
+            cTp = cTs @ sTp                     # camera to hole pose
+            # store depth (in camera frame)
+            self.holesDepth[idx] = cTp[2, 3]    # depth (Z value) 
 
     def computeImgPointVel(self, des_point, cur_point):
         """
@@ -270,6 +297,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.arucoPose = self.blackboard.get("arucoPose")
         self.curHoles = self.blackboard.get("curHoles")
         self.depthImg = self.blackboard.get("depthImg")
+        self.holesPose = self.blackboard.get("holesPose")
         self.curArucoCorners[0] = self.blackboard.get("cur_top_left")
         self.curArucoCorners[1] = self.blackboard.get("cur_top_right")
         self.curArucoCorners[2] = self.blackboard.get("cur_bottom_right")
@@ -299,7 +327,7 @@ class VisualServoing(py_trees.behaviour.Behaviour):
             self.logger.warning("Aruco pose is none")
             return py_trees.common.Status.FAILURE
         
-        if (self.servoSocket and (self.depthImg is None)):
+        if (self.servoSocket and (self.holesPose is None)):
             self.logger.warning("Depth image is none")
             return py_trees.common.Status.FAILURE
         
@@ -324,6 +352,9 @@ class VisualServoing(py_trees.behaviour.Behaviour):
 
         elif (self.servoSocket and self.curHoles is not None):
             # servo on socket holes
+
+            # compute depth of holes
+            self.computeHolesDepth()
 
             # compute pixel velocity
             tempLst = []

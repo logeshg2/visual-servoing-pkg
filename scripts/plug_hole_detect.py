@@ -59,11 +59,11 @@ class HoleDetector(Node):
         self.holesPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/hole_best.pt")
         self.desiredHoles = np.array([
-            [337, 221],
-            [319, 245],
-            [356, 244],
-            [318, 266],
-            [359, 265]
+            [339, 213],
+            [317, 245],
+            [365, 243],
+            [315, 272],
+            [369, 270]
         ])
         # object points
         self.object_points = np.array([

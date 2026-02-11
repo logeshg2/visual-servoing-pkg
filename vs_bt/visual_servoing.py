@@ -97,14 +97,14 @@ class VisualServoing(py_trees.behaviour.Behaviour):
         self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])       # [topLeft, topRight, bottomRight, bottomLeft]
         
         # yolo holes
-        self.refDepth = 0.27
+        self.refDepth = 0.208
         self.holesDepth = np.array([-1.0, -1.0, -1.0, -1.0, -1.0])
         self.desiredHoles = np.array([
-            [337, 221],
-            [319, 245],
-            [356, 244],
-            [318, 266],
-            [359, 265]
+            [339, 213],
+            [317, 245],
+            [365, 243],
+            [315, 272],
+            [369, 270]
         ])
 
         # aruco parameters

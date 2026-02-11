@@ -128,7 +128,8 @@ class ArucoNode(Node):
                 [self.markerLength / 2, self.markerLength / 2, 0],
                 [-self.markerLength / 2, self.markerLength / 2, 0]
             ], dtype=np.float32)
-            _, rvec, tvec = cv2.solvePnP(object_points, np.array(self.corner), self.K, self.camDist, False, flags=cv2.SOLVEPNP_EPNP )
+            # _, rvec, tvec = cv2.solvePnP(object_points, np.array(self.corner), self.K, self.camDist, False, flags=cv2.SOLVEPNP_EPNP )
+            _, rvec, tvec, inliers = cv2.solvePnPRansac(object_points, np.array(self.corner), self.K, self.camDist)
             if (_):
                 cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.05, 3)
                 rvec = rvec.flatten()

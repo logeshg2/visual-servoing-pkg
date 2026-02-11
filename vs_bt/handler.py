@@ -29,6 +29,7 @@ class Handler(py_trees.behaviour.Behaviour):
         self.moveToTracking = False
         self.performAlignment = False
         self.arucoPose = None
+        self.holesPose = None
         self.eTc = None
 
         # set blackboard parameters
@@ -38,12 +39,14 @@ class Handler(py_trees.behaviour.Behaviour):
         self.blackboard.set("converged", self.converged)
         self.blackboard.set("moveToTracking", self.moveToTracking)
         self.blackboard.set("performAlignment", self.performAlignment)
+        self.blackboard.set("holesPose", self.holesPose)
 
     def initialise(self):
         """Read blackboard"""
 
         self.eTc = self.blackboard.get("eTc")
         self.arucoPose = self.blackboard.get("arucoPose")
+        self.holesPose = self.blackboard.get("holesPose")
         self.converged = self.blackboard.get("converged")
         self.triggered = self.blackboard.get("triggered")
         self.servoAruco = self.blackboard.get("servoAruco")
@@ -55,6 +58,8 @@ class Handler(py_trees.behaviour.Behaviour):
         """Trigger operation | movements"""
 
         if ((self.servoAruco and self.arucoPose is None) and not self.performAlignment):
+            return py_trees.common.Status.FAILURE
+        if ((self.servoSocket and self.holesPose is None) and not self.performAlignment):
             return py_trees.common.Status.FAILURE
 
         if (not self.triggered):
@@ -154,8 +159,46 @@ class Handler(py_trees.behaviour.Behaviour):
 
             else:
                 # insertion operation
-                pass
+                if (self.opr_count == 0):
+                    # current base to ee pose
+                    curPose = self.bot.read_current_cartesian_pose()
+                    bTe = np.eye(4)
+                    bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
+                    bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
 
+                    # socket to grip pose
+                    sTo = np.eye(4)
+                    sTo[0:3, 3] = np.array([0.0, 0.0, -0.06 ])
+                    sTo[0:3, 0:3] = Rotation.from_euler("xyz", (0, 0, -90), degrees=True).as_matrix()
+                    # camera to grip pose (self.socketPose -> sTa)
+                    cTo = self.holesPose @ sTo
+
+                    # ee to grip pose
+                    eTo = self.eTc @ cTo
+                    eTo[2, 3] -= 0.110
+
+                    # base to object pose
+                    bTo = bTe @ eTo
+
+                    # compute pose as list
+                    cartPose = np.empty(6)
+                    cartPose[0:3] = bTo[0:3, 3] * 1000
+                    cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
+                    cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
+
+                    # perform motion
+                    self.blackboard.set("tarCartPos", cartPose)
+                    self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+
+                    self.opr_count += 1
+
+                    return py_trees.common.Status.SUCCESS
+                
+                elif (self.opr_count == 1):
+                    # perform insertion
+                    self.logger.info(f"Reached insertion point!")
+
+                    return py_trees.common.Status.RUNNING
 
 
         if ((self.triggered and not self.moveToTracking) and (not self.servoAruco and not self.servoSocket)):

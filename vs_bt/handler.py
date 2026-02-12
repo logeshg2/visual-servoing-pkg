@@ -26,7 +26,8 @@ class Handler(py_trees.behaviour.Behaviour):
         self.triggered = False
         self.servoAruco = False
         self.servoSocket = False
-        self.converged = False
+        self.converged_aruco = False
+        self.converged_socket = False
         self.moveToTracking = False
         self.performAlignment = False
 
@@ -60,7 +61,8 @@ class Handler(py_trees.behaviour.Behaviour):
         """Read blackboard"""
 
         self.servoTask = self.blackboard.get("servoTask")
-        self.converged = self.blackboard.get("converged")
+        self.converged_aruco = self.blackboard.get("converged_aruco")
+        self.converged_socket = self.blackboard.get("converged_socket")
         self.triggered = self.blackboard.get("triggered")
         self.servoAruco = self.blackboard.get("servoAruco")
         self.servoSocket = self.blackboard.get("servoSocket")
@@ -69,11 +71,13 @@ class Handler(py_trees.behaviour.Behaviour):
 
     def update(self):
         """Trigger operation | movements"""
+        # TODO : proper logic
 
         if (not self.triggered):
             return py_trees.common.Status.FAILURE
-        elif ((self.triggered and not self.converged) and (self.servoAruco or self.servoSocket)):
+        elif (not self.performAlignment) and ((self.triggered and (not self.converged_aruco and not self.converged_socket)) and (self.servoAruco or self.servoSocket)):
             # success if servoing is in progress
+            self.blackboard.set("controlMode", ControlType.camVelCtrl)
             return py_trees.common.Status.SUCCESS
         elif (self.triggered and self.performAlignment):
             # perform alignment and perform operation (pick | insert)
@@ -169,9 +173,9 @@ class Handler(py_trees.behaviour.Behaviour):
                 else:
                     # picking operation is over
                     self.performAlignment = False
-                    self.converged = False
+                    # self.converged = False
                     self.blackboard.set("performAlignment", self.performAlignment)
-                    self.blackboard.set("converged", self.converged)
+                    # self.blackboard.set("converged", self.converged)
 
             else:
                 # insertion operation
@@ -238,7 +242,7 @@ class Handler(py_trees.behaviour.Behaviour):
             self.blackboard.set("controlMode", ControlType.camVelCtrl)
 
             return py_trees.common.Status.SUCCESS
-        elif ((self.triggered and self.servoAruco) and self.converged):
+        elif ((self.triggered and self.servoAruco) and self.converged_aruco):
             # trigger alignment and picking - convergence
             self.opr_count = 0      # reset operation counter
             self.performAlignment = True
@@ -247,7 +251,7 @@ class Handler(py_trees.behaviour.Behaviour):
             self.blackboard.set("servoTask", self.servoTask)
             
             # return running or failure to perform alignment procedure (in the same scipt)
-            return py_trees.common.Status.RUNNING
+            return py_trees.common.Status.FAILURE
         elif ((self.triggered and self.servoAruco)):
             # trigger socket holes servoing
             self.servoSocket = True
@@ -259,7 +263,7 @@ class Handler(py_trees.behaviour.Behaviour):
             self.blackboard.set("servoTask", self.servoTask)
 
             return py_trees.common.Status.SUCCESS
-        elif ((self.triggered and self.servoSocket) and self.converged):
+        elif ((self.triggered and self.servoSocket) and self.converged_socket):
             # trigger alignment and insertion - convergence
             self.opr_count = 0      # reset operation counter
             self.performAlignment = True
@@ -268,7 +272,7 @@ class Handler(py_trees.behaviour.Behaviour):
             self.blackboard.set("servoTask", self.servoTask)
             
             # return running or failure to perform alignment procedure (in the same scipt)
-            return py_trees.common.Status.RUNNING
+            return py_trees.common.Status.FAILURE
         else:
             # not defined
             self.servoTask = "no_servo"

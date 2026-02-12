@@ -35,6 +35,8 @@ class visualServoingNode(Node):
         self.approxIntMat = None
         self.pixelVel = None
         self.converged = False
+        self.aruco_conv = False
+        self.socket_conv = False
         self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -388,6 +390,11 @@ class visualServoingNode(Node):
     def computeCamVel(self):
         """Function to compute camera velocity from pixel velocity"""
         
+        # handle none cases
+        if ((self.servoTask == "servo_aruco" and self.curArucoCorners is None) or (self.servoTask == "servo_socket" and self.curSocketHoles is None)):
+            self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            return
+
         if (self.servoTask == "servo_aruco" and self.arucoPose is not None):
             # ibvs on aruco
             # compute depth of aruco corners
@@ -448,17 +455,34 @@ class visualServoingNode(Node):
         if (self.servoTask is None or self.servoTask == "no_servo"):
             # servoing not started yet or not to servo now
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+            # also inform bt about stop of convergence
+            msg = String()
+            msg.data = "0"
+            self.conv_status_pub.publish(msg)
+
             return
         
         # handle convergence
         if (self.converged == True):
             self.get_logger().info(f"Visual servoing converged: {self.converged}")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            if (self.servoTask == "servo_aruco"):
+                self.aruco_conv = True
+                self.socket_conv = False
+            else:
+                self.socket_conv = True
+                self.aruco_conv = False
             self.servoTask = "no_servo"
 
         # publish convergence status
         conv_msg = String()
-        conv_msg.data = "1" if (self.converged) else "0"
+        if (self.aruco_conv):
+            conv_msg.data = "1_aruco"
+        elif (self.socket_conv):
+            conv_msg.data = "1_socket"
+        else:
+            conv_msg.data = "0"
         self.conv_status_pub.publish(conv_msg)
 
         # main control logic
@@ -471,6 +495,8 @@ class visualServoingNode(Node):
         elif (self.servoTask == "servo_aruco" or self.servoTask == "servo_socket"):
             # compute ee velocity
             self.converged = False
+            self.aruco_conv = False
+            self.socket_conv = False
             self.computeEEVel()
 
 

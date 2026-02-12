@@ -24,7 +24,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         # ros2 communication variables (initializing)
         self.node = node
         self.servoTask = "no_servo"
-        self.converged = False
+        self.converged_aruco = False
+        self.converged_socket = False
         self.triggered = False
         self.data_read_group = ReentrantCallbackGroup()
         self.cv_bridge = CvBridge()
@@ -36,7 +37,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
 
         # set blackboard value to default
         self.blackboard.set("triggered", self.triggered)
-        self.blackboard.set("converged", self.converged)
+        self.blackboard.set("converged_aruco", self.converged_aruco)
+        self.blackboard.set("converged_socket", self.converged_socket)
         self.blackboard.set("servoTask", self.servoTask)
 
         # ros2 subscription
@@ -52,7 +54,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         """Callback function to read convergence status from ros2 vs node"""
 
         if (msg.data is not None):
-            self.converged = True if (msg.data == "1") else False
+            self.converged_aruco = True if (msg.data == "1_aruco") else False
+            self.converged_socket = True if (msg.data == "1_socket") else False
         else:
             self.converged = False
 
@@ -78,7 +81,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
 
             # set blackboard value to default
             self.blackboard.set("triggered", self.triggered)
-            self.blackboard.set("converged", self.converged)
+            self.blackboard.set("converged_aruco", self.converged_aruco)
+            self.blackboard.set("converged_socket", self.converged_socket)
 
             # publish servoTask to ros2 VS node
             msg = String()

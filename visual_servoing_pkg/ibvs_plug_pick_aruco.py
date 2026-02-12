@@ -54,6 +54,7 @@ class IBVS_plug_pick(Node):
 
         # image jacobian | velocity variables
         self.lambdaVar =  0.4                  # exponential decay factor (Lambda)
+        self.converged = False
         self.pixelVel = None
         self.imgJacob = None
         self.ee_vel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -322,7 +323,12 @@ class IBVS_plug_pick(Node):
         # NOTE: `camVel.flatten()` -> [Vx, Vy, Vz, Wx, Wy, Wz]
         
         # print(np.round(camVel.flatten(), 4))
-        
+
+         # check convergence
+        if (np.max(np.abs(self.pixelVel.flatten())) < 0.006):
+            self.converged = True
+            self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
         return camVel.flatten()
     
     def computeEEVel(self):
@@ -387,7 +393,7 @@ class IBVS_plug_pick(Node):
 
     def main_timer_cb(self):
         # perform visual servoing
-        if (self.triggered):
+        if (self.triggered and not self.converged):
             # compute EE velocity
             self.computeEEVel()
             # self.get_logger().info(f"EE Vel: {self.ee_vel}")
@@ -397,13 +403,13 @@ class IBVS_plug_pick(Node):
             print(np.round(self.ee_vel, 4))
 
             # check convergence ( only when servoing )
-            if (self.inServoing and np.all(self.ee_vel < 0.0004)):
-                self.get_logger().info(f"Visual Servoing Converged!")
-                self.triggered = False
-                self.converged = True
-                self.inServoing = False
-                self.get_logger().info(f"Performing picking operations")
-                return
+            # if (self.inServoing and np.all(self.ee_vel < 0.0004)):
+            #     self.get_logger().info(f"Visual Servoing Converged!")
+            #     self.triggered = False
+            #     self.converged = False
+            #     self.inServoing = False
+            #     self.get_logger().info(f"Performing picking operations")
+            #     return
 
             # read the current cartesion position
             cur_joint_pose = self.bot.read_current_joint_position()
@@ -430,6 +436,37 @@ class IBVS_plug_pick(Node):
 
         # perform picking (after convergence)
         if (self.arucoPose is not None and (self.converged and not self.picked)):
+            
+            bTe1 = np.eye(4)
+            bTe1[0:3, 3] = np.array([93.54667663574219, 312.555908203125, -21.916120529174805]) / 1000
+            bTe1[0:3, 0:3] = Rotation.from_euler("xyz", [175.60801696777344, -0.1113772913813591, 100.841552734375], degrees=True).as_matrix()
+            bTe2 = np.eye(4)
+            bTe2[0:3, 3] = np.array([65.13397216796875, 334.2900085449219, -103.98701477050781]) / 1000
+            bTe2[0:3, 0:3] = Rotation.from_euler("xyz", [179.27284240722656, -1.7047703266143799, 94.56122589111328], degrees=True).as_matrix()
+            e1Te2 = np.linalg.inv(bTe1) @ bTe2
+
+
+            curPose = self.bot.read_current_cartesian_pose()
+
+            bTe = np.eye(4) 
+            bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
+            bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
+
+            bTo = bTe @ e1Te2
+
+            cartPose = np.empty(6)
+            cartPose[0:3] = bTo[0:3, 3] * 1000
+            cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
+            
+            self.bot.write_cartesian_position(cartPose, blocking=False)
+            time.sleep(3)
+            while (self.bot.is_moving()):
+                time.sleep(0.1)
+            
+
+            self.picked = True
+
+            """
             # compute current ee pose
             curPose = self.bot.read_current_cartesian_pose()
             bTe = np.eye(4) 
@@ -483,77 +520,7 @@ class IBVS_plug_pick(Node):
             time.sleep(2)
             while (self.bot.is_moving()):
                 time.sleep(0.1)
-
-            # move down -> check force -> if high than threshold -> go up again -> explore x-y coord -> if reached 15mm down -> then stop
-            # this did not work
             """
-            fz_thresh = 100
-            hit = False
-            for step in range(1, 15):
-                fz = self.bot.read_force_sensor_values()[0]
-                print(fz)
-                if (fz >= fz_thresh):
-                    hit = True
-                    break
-                curPose = self.bot.read_current_cartesian_pose()
-                curPose[2] -= 1
-                # move the arm
-                self.bot.set_speed_percent(10)
-                self.bot.write_cartesian_position(curPose, blocking=False)
-                time.sleep(2)
-                while (self.bot.is_moving()):
-                    time.sleep(0.1)
-
-            if (not hit):
-                print("Arm reached the gripping position - no hit")
-            else:
-                print("Arm hit the target - going back")
-                self.bot.set_speed_percent(10)
-                self.bot.write_joint_pose(tempPose, blocking=False)
-                time.sleep(3)
-                while (self.bot.is_moving()):
-                    time.sleep(0.1)
-            """
-
-            """
-            # compute desired joint config
-            curJointConfig = self.bot.read_current_joint_position()
-            tarJointConfig = curJointConfig + self.diff2reach_pick
-            # move to target pick location
-            self.bot.write_joint_pose(tarJointConfig, blocking=False)
-            time.sleep(1)
-            while (self.bot.is_moving()):
-                time.sleep(0.1)
-
-            # move z down
-            curJointConfig = self.bot.read_current_joint_position()
-            tarJointConfig = curJointConfig + self.pickmove
-            # move to target pick location
-            self.bot.write_joint_pose(tarJointConfig, blocking=False)
-            time.sleep(1)
-            while (self.bot.is_moving()):
-                time.sleep(0.1)
-
-            # close gripper
-            self.bot.air_gripper_control("close")
-
-            # move z up
-            curJointConfig = self.bot.read_current_joint_position()
-            tarJointConfig = curJointConfig - self.pickmove
-            # move to target pick location
-            self.bot.write_joint_pose(tarJointConfig, blocking=False)
-            time.sleep(1)
-            while (self.bot.is_moving()):
-                time.sleep(0.1)
-
-            # goback to tracking position
-            self.bot.write_cartesian_position(coords=self.tracking_pose, blocking=False)
-            time.sleep(2)
-            while (self.bot.is_moving()):
-                time.sleep(0.1)
-            """
-            # perform picking
-            self.picked = True
 
 
 def main():

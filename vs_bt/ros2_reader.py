@@ -11,11 +11,8 @@ from scipy.spatial.transform import Rotation
 
 import rclpy
 from cv_bridge import CvBridge
+from std_msgs.msg import String
 from std_srvs.srv import SetBool
-from sensor_msgs.msg import Image
-from geometry_msgs.msg import Pose
-from std_msgs.msg import Int64MultiArray
-from visual_servoing_pkg.msg import ArucoCorner
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 
@@ -26,14 +23,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
 
         # ros2 communication variables (initializing)
         self.node = node
-        self.arucoPose = None
-        self.cur_top_left = None
-        self.cur_top_right = None
-        self.cur_bottom_right = None
-        self.cur_bottom_left = None
-        self.curHoles = None
-        self.depthImg = None
-        self.holesPose = None
+        self.servoTask = "no_servo"
+        self.converged = False
         self.triggered = False
         self.data_read_group = ReentrantCallbackGroup()
         self.cv_bridge = CvBridge()
@@ -45,78 +36,25 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
 
         # set blackboard value to default
         self.blackboard.set("triggered", self.triggered)
-        # aruco
-        self.blackboard.set("cur_top_left", self.cur_top_left)
-        self.blackboard.set("cur_top_right", self.cur_top_right)
-        self.blackboard.set("cur_bottom_right", self.cur_bottom_right)
-        self.blackboard.set("cur_bottom_left", self.cur_bottom_left)
-        self.blackboard.set("arucoPose", self.arucoPose)
-        # plug hole
-        self.blackboard.set("curHoles", self.curHoles)
-        self.blackboard.set("depthImg", self.depthImg)
-        self.blackboard.set("holesPose", self.holesPose)
+        self.blackboard.set("converged", self.converged)
+        self.blackboard.set("servoTask", self.servoTask)
 
         # ros2 subscription
-        self.aruco_corner_sub = self.node.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 1, callback_group=self.data_read_group)
-        self.aruco_pose_sub = self.node.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 1, callback_group=self.data_read_group)
-        self.matchPoints_sub = self.node.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 1, callback_group=self.data_read_group)
-        self.depthImg_sub = self.node.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.depthImg_cb, 10)
-        self.holes_pose_sub = self.node.create_subscription(Pose, "/holes_pose", self.socket_pose_cb, 1, callback_group=self.data_read_group)
+        self.conv_status_sub = self.node.create_subscription(String, "/converged_status", self.conv_status_cb, 10, callback_group=self.data_read_group)
+
+        # ros2 publishers
+        self.servo_task_pub = self.node.create_publisher(String, "/servo_task", 10)
 
         # ros2 service
         self.trigger_srv = self.node.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
 
-    def corners_sub_cb(self, msg):
-        if (msg.top_left is not None):
-            self.cur_top_left = msg.top_left
-            self.cur_top_right = msg.top_right
-            self.cur_bottom_right = msg.bottom_right
-            self.cur_bottom_left = msg.bottom_left
-        else:
-            self.cur_top_left = None
-            self.cur_top_right = None
-            self.cur_bottom_right = None
-            self.cur_bottom_left = None
+    def conv_status_cb(self, msg):
+        """Callback function to read convergence status from ros2 vs node"""
 
-    def pose_sub_cb(self, msg):
-        if (msg.position is not None and msg.position.x != -1.0):
-            # pose extraction
-            self.arucoPose = np.eye(4)
-            self.arucoPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
-            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
-            self.arucoPose[0:3, 0:3] = rotm
+        if (msg.data is not None):
+            self.converged = True if (msg.data == "1") else False
         else:
-            self.arucoPose = None
-
-    def socket_pose_cb(self, msg):
-        if (msg.position is not None and msg.position.x != -1.0):
-            # pose extraction
-            self.holesPose = np.eye(4)
-            self.holesPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
-            rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
-            self.holesPose[0:3, 0:3] = rotm
-        else:
-            self.holesPose = None
-
-    def matched_points_cb(self, msg):
-        """Callback function to extract matched points from the ros2 custom message"""
-
-        if (msg.data is not None and (msg.data[0] != -1)):
-            # extract plug holes coordinates
-            self.curHoles = np.array(msg.data).reshape((5, 2))
-        else:
-            self.curHoles = None
-            # self.get_logger().warn(f"Matched points published are not enough!")
-
-    def depthImg_cb(self, msg):
-        """Callback function to extract depth image from ros2 image message"""
-        
-        if (msg is not None):
-            self.depthImg = self.cv_bridge.imgmsg_to_cv2(msg)
-            self.depthImg = np.float64(self.depthImg) / 1000.0          # in meters
-        else:
-            self.depthImg = None
-            self.node.get_logger().warn(f"Depth image msg is None!")
+            self.converged = False
 
     def trigger_servoing_cb(self, request, response):
         if (request.data):
@@ -129,7 +67,9 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         return response
 
     def initialise(self):
-        pass
+        """Read from bt - that needs to be updated to ros2 nodes"""
+
+        self.servoTask = self.blackboard.get("servoTask")
 
     def update(self):
         """Update blackboard"""
@@ -138,18 +78,12 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
 
             # set blackboard value to default
             self.blackboard.set("triggered", self.triggered)
+            self.blackboard.set("converged", self.converged)
 
-            # aruco
-            self.blackboard.set("cur_top_left", self.cur_top_left)
-            self.blackboard.set("cur_top_right", self.cur_top_right)
-            self.blackboard.set("cur_bottom_right", self.cur_bottom_right)
-            self.blackboard.set("cur_bottom_left", self.cur_bottom_left)
-            self.blackboard.set("arucoPose", self.arucoPose)
-
-            # plug hole
-            self.blackboard.set("curHoles", self.curHoles)
-            self.blackboard.set("depthImg", self.depthImg)
-            self.blackboard.set("holesPose", self.holesPose)
+            # publish servoTask to ros2 VS node
+            msg = String()
+            msg.data = self.servoTask
+            self.servo_task_pub.publish(msg)
 
             return py_trees.common.Status.SUCCESS
         except Exception as e:

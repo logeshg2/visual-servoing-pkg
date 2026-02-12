@@ -30,10 +30,10 @@ def main():
     read_from_ros = ReadfromROS(node)
     course_handler = Handler(realRobot)
     check_movement = CheckMovement(realRobot)
-    visual_servoing = VisualServoing()
+    # visual_servoing = VisualServoing()
     move_arm = MoveArm(realRobot, ControlType.camVelCtrl)
     # construct root + tree
-    root.add_children([read_from_ros, check_movement, course_handler, visual_servoing, move_arm])
+    root.add_children([read_from_ros, check_movement, course_handler, move_arm])
 
     # initialize tree
     behaviour_tree = py_trees.trees.BehaviourTree(root=root)

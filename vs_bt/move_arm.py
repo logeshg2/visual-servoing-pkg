@@ -142,6 +142,10 @@ class MoveArm(py_trees.behaviour.Behaviour):
     def update(self):
         """Perform robot motion based on controlMode"""
         
+        # avoid camera velocity commands (servoing is done is separate node)
+        if (self.controlMode == ControlType.camVelCtrl):
+            return py_trees.common.Status.SUCCESS
+
         try:
             # read the current joint position
             cur_joint_pose = self.bot.read_current_joint_position()

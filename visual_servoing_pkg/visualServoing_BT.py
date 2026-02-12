@@ -87,7 +87,7 @@ class visualServoingNode(Node):
         # intrinsic's
         self.K = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb"))
         self.Kinv = np.linalg.inv(self.K)
-        self.camDist = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl"))
+        self.camDist = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl", "rb"))
 
         # extrinsic's
         mat = pickle.load(open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/eye_in_hand_rs.pkl", "rb"))
@@ -448,6 +448,7 @@ class visualServoingNode(Node):
         if (self.servoTask is None or self.servoTask == "no_servo"):
             # servoing not started yet or not to servo now
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            return
         
         # handle convergence
         if (self.converged == True):

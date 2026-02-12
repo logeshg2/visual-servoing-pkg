@@ -10,8 +10,8 @@ import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
 from geometry_msgs.msg import Pose
-from std_msgs.msg import Int64MultiArray
 from visual_servoing_pkg.msg import ArucoCorner
+from std_msgs.msg import String, Int64MultiArray
 from rclpy.callback_groups import ReentrantCallbackGroup
 
 import cv2
@@ -30,7 +30,11 @@ class visualServoingNode(Node):
 
         # variables
         self.dt = 1.0
+        self.servoTask = None
         self.lambdaVar = 0.3
+        self.approxIntMat = None
+        self.pixelVel = None
+        self.converged = False
         self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -70,10 +74,9 @@ class visualServoingNode(Node):
         self.aruco_pose_sub = self.create_subscription(Pose, "/aruco_pose", self.aruco_pose_sub_cb, 10, callback_group=self.data_read_group)
         self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
         self.holes_pose_sub = self.create_subscription(Pose, "/holes_pose", self.socket_pose_cb, 10, callback_group=self.data_read_group)
+        self.servo_task_sub = self.create_subscription(String, "/servo_task", self.servo_task_cb, 10, callback_group=self.data_read_group)
         # pub
-        ##
-        # services
-        self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
+        self.conv_status_pub = self.create_publisher(String, "/converged_status", 10)
         # timers
         self.main_timer = self.create_timer(1/100, self.controlLoop)
 
@@ -177,6 +180,14 @@ class visualServoingNode(Node):
             )
         self.holes_desiredIntMat = np.vstack(tempLst)
         self.holes_currentIntMat = np.empty((10, 6))
+
+    def servo_task_cb(self, msg):
+        """Callback function to read servo task"""
+
+        if (msg.data is not None):
+            self.servoTask = msg.data
+        else:
+            self.servoTask = None
 
     def corners_sub_cb(self, msg):
         """Callback function to read current aruco corners"""
@@ -286,7 +297,42 @@ class visualServoingNode(Node):
         pix_vel = np.subtract(np.array(cur_xy), np.array(des_xy))           # difference of points in image plane
         return pix_vel
     
-    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0, pixelVel):
+    def computePixelVel(self, desFeatureArray, curFeatureArray):
+        """
+        Function compute pixel velocity from current and desired pixel coordinates
+        
+        Args:
+            - desFeatureArray: list or array containing desired feature points in pixel
+            - curFeatureArray: list or array containing current feature points in pixel 
+        """
+
+        tempLst = []
+        for refPoint, curPoint in zip(desFeatureArray, curFeatureArray):
+                tempLst.append(
+                    self.computeImgPointVel(refPoint, curPoint).flatten().tolist()
+                )
+        pixelVel = np.array(tempLst).reshape((len(desFeatureArray) * 2), 1)
+        return pixelVel
+
+    def computeCurrentInteractionMat(self, curFeatureArray, featurDepth):
+        """
+        Function to compute current image jacobian matrix based on the feature points detected.
+        
+        Args:
+            - curFeatureArray: list or array containing current feature points in pixel
+            - featureDepth: list or array of depth (Z) of every feature point
+        """
+
+        # compute feature jacobian
+        tempLst = []
+        for (u, v), Z in zip(curFeatureArray, featurDepth):
+            tempLst.append(
+                self.computeInteractionMatrix(u, v, Z)
+            )
+        curIntMat = np.vstack(tempLst)
+        return curIntMat
+
+    def setAdaptiveGain(self, lam_0, lam_inf, lam_s0):
         """
         Function to compute adaptive gain based on the error vector and other paramters
         This approach was inspired from `ViSP team`.
@@ -304,7 +350,7 @@ class visualServoingNode(Node):
         
         # compute infinite norm of error vector (i.e., getting abs max of error vector)
         x_norm = 0.0
-        for err in pixelVel:
+        for err in self.pixelVel:
             abs_err = abs(err[0])
             if (abs_err > x_norm):
                 x_norm = abs_err 
@@ -339,17 +385,132 @@ class visualServoingNode(Node):
         
         return qpos
 
+    def computeCamVel(self):
+        """Function to compute camera velocity from pixel velocity"""
+        
+        if (self.servoTask == "servo_aruco" and self.arucoPose is not None):
+            # ibvs on aruco
+            # compute depth of aruco corners
+            self.computeTargetDepth(self.aruco_object_points, self.arucoPose, self.cornerDepth)
+
+            # compute pixel velocities
+            self.pixelVel = self.computePixelVel(self.desArucoCorners, self.curArucoCorners)
+
+            # compute current interaction matrix (feature jacobian)
+            self.aruco_currentIntMat = self.computeCurrentInteractionMat(self.curArucoCorners, self.cornerDepth)
+
+            # Approximation of Interaction Matrix - (8x6)
+            self.approxIntMat = (self.aruco_currentIntMat + self.aruco_desiredIntMat) / 2
+
+        elif (self.servoTask == "servo_socket" and self.socketPose is not None):
+            # ibvs on socket
+            # compute depth of socket holes
+            self.computeTargetDepth(self.socket_object_points, self.socketPose, self.holesDepth)
+
+            # compute pixel velocities
+            self.pixelVel = self.computePixelVel(self.desSocketHoles, self.curSocketHoles)
+
+            # compute current interaction matrix (feature jacobian)
+            self.holes_currentIntMat = self.computeCurrentInteractionMat(self.curSocketHoles, self.holesDepth)
+
+            # Approximation of Interaction Matrix - (8x6)
+            self.approxIntMat = (self.holes_currentIntMat + self.holes_desiredIntMat) / 2
+
+        # compute lambda for current pixelVel
+        # Adaptive gain (lambda_adapt)
+        self.setAdaptiveGain(0.5, 0.3, 30.0)                # default - [1.666, 0.666, 1.666] 
+        # tuning adaptive gain parameter using constant lambda
+        # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
+
+        # compute camVel 
+        self.camVel = -1 * self.lambdaVar * (np.linalg.pinv(self.approxIntMat) @ self.pixelVel)        # (6x1) = (6x8) @ (8x1)
+        self.camVel = self.camVel.flatten()     # (6,)
+
+        # check convergence
+        if (np.max(np.abs(self.pixelVel.flatten())) < 0.006):
+            self.converged = True
+            self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    def computeEEVel(self):
+        """Function to compute end effector velocity (form camera velocity)"""
+        
+        # compute camera velocity from pixel feature velocities
+        self.computeCamVel()
+
+        # camera velocity to end effector velocity
+        # using adjoint transformation (Ad_eTc)
+        self.eeVel = (self.ADeTc @ self.camVel).flatten() 
 
     def controlLoop(self):
         """Main timer function to compute eeVel at that time stamp and move the arm"""
 
-        pass
+        # handle
+        if (self.servoTask is None or self.servoTask == "no_servo"):
+            # servoing not started yet or not to servo now
+            self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        
+        # handle convergence
+        if (self.converged == True):
+            self.get_logger().info(f"Visual servoing converged: {self.converged}")
+            self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self.servoTask = "no_servo"
 
+        # publish convergence status
+        conv_msg = String()
+        conv_msg.data = "1" if (self.converged) else "0"
+        self.conv_status_pub.publish(conv_msg)
+
+        # main control logic
+        if (self.servoTask == "servo_aruco" and self.arucoPose is None):
+            self.get_logger().warn(f"Aruco pose is none")
+            self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        elif (self.servoTask == "servo_socket" and self.socketPose is None):
+            self.get_logger().warn(f"Socket pose is none")
+            self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        elif (self.servoTask == "servo_aruco" or self.servoTask == "servo_socket"):
+            # compute ee velocity
+            self.converged = False
+            self.computeEEVel()
+
+
+        # velocity filter (TODO: Kalman filter instead on moving average)
+        self.eeVel = self.maVelFilter(self.eeVel)
+        print(np.round(self.eeVel, 4))
+
+        # read the current cartesion position
+        cur_joint_pose = self.bot.read_current_joint_position()
+        # current joint position (deg to rad) + J23 coupling
+        rad_arr = np.deg2rad(cur_joint_pose)
+        # remove coupling - J[3]' = J[3] + J[2]
+        rad_arr[2] = rad_arr[2] + rad_arr[1]
+
+        # ee velocity to joint velocity
+        current_jacobian = pinocchio.computeFrameJacobian(self.robotModel, self.robotData, np.array(rad_arr), self.eeFrameId)   # 6x6 
+        joint_vels = (np.linalg.pinv(current_jacobian) @ np.array([self.eeVel]).T)  # 6x6 @ 6x1 => 6x1
+        joint_vels = joint_vels.flatten()      # [Vj1, Vj2, Vj3, Vj4, Vj5, Vj6]
+
+        # compute target joint angle from target velocity
+        target_rad_arr = self.integrateVel(qpos=rad_arr, qvel=joint_vels)
+        
+        # adding coupling - J[3]' = J[3] - J[2]
+        target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
+        target_joint_pose = np.rad2deg(target_rad_arr).tolist()
+
+        # write register and sync-movement
+        # self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")
+        self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
 
 def main():
     rclpy.init()
 
+    try:
+        node = visualServoingNode()
+        rclpy.spin(node)
+    except Exception as e:
+        print(f"Shutting down IBVS node:\nException: {e}")
+        node.destroy_node()
+        # rclpy.shutdown()
 
 if __name__ == "__main__":
     main()

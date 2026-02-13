@@ -42,10 +42,10 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         self.blackboard.set("servoTask", self.servoTask)
 
         # ros2 subscription
-        self.conv_status_sub = self.node.create_subscription(String, "/converged_status", self.conv_status_cb, 10, callback_group=self.data_read_group)
+        self.conv_status_sub = self.node.create_subscription(String, "/converged_status", self.conv_status_cb, 1, callback_group=self.data_read_group)
 
         # ros2 publishers
-        self.servo_task_pub = self.node.create_publisher(String, "/servo_task", 10)
+        self.servo_task_pub = self.node.create_publisher(String, "/servo_task", 1)
 
         # ros2 service
         self.trigger_srv = self.node.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)

@@ -76,9 +76,9 @@ class visualServoingNode(Node):
         self.aruco_pose_sub = self.create_subscription(Pose, "/aruco_pose", self.aruco_pose_sub_cb, 10, callback_group=self.data_read_group)
         self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
         self.holes_pose_sub = self.create_subscription(Pose, "/holes_pose", self.socket_pose_cb, 10, callback_group=self.data_read_group)
-        self.servo_task_sub = self.create_subscription(String, "/servo_task", self.servo_task_cb, 10, callback_group=self.data_read_group)
+        self.servo_task_sub = self.create_subscription(String, "/servo_task", self.servo_task_cb, 1, callback_group=self.data_read_group)
         # pub
-        self.conv_status_pub = self.create_publisher(String, "/converged_status", 10)
+        self.conv_status_pub = self.create_publisher(String, "/converged_status", 1)
         # timers
         self.main_timer = self.create_timer(1/100, self.controlLoop)
 
@@ -498,7 +498,9 @@ class visualServoingNode(Node):
             self.aruco_conv = False
             self.socket_conv = False
             self.computeEEVel()
-
+        else:
+            self.converged = False
+            self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
         # velocity filter (TODO: Kalman filter instead on moving average)
         self.eeVel = self.maVelFilter(self.eeVel)

@@ -38,12 +38,14 @@ install(PROGRAMS
   scripts/aruco_board_node.py
   scripts/superglue_n_points.py
   scripts/plug_hole_detect.py
+  scripts/extension_box_detect.py
   visual_servoing_pkg/ibvs_aruco_corner.py
   visual_servoing_pkg/pbvs_aruco_pose.py
   visual_servoing_pkg/ibvs_n_points.py
   visual_servoing_pkg/ibvs_plug_hole.py
   visual_servoing_pkg/ibvs_plug_pick_aruco.py
   visual_servoing_pkg/visualServoing_BT.py
+  visual_servoing_pkg/ibvs_extension_box.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -103,13 +103,13 @@ class IBVS_plug_hole(Node):
         self.cv_bridge = CvBridge()
 
         # compute desired interaction matrix - this will be constant
-        self.refDepth = 0.27
+        self.refDepth = 0.208
         self.desiredHoles = np.array([
-            [337, 221],
-            [319, 245],
-            [356, 244],
-            [318, 266],
-            [359, 265]
+            [339, 213],
+            [317, 245],
+            [365, 243],
+            [315, 272],
+            [369, 270]
         ])
         self.computeDesiredInteractionMat()
 

@@ -289,7 +289,7 @@ class HoleDetector(Node):
                 image_points = np.float64(self.holes[1:, :])        # remove point 1
                 _, rvec, tvec, inliers = cv2.solvePnPRansac(self.object_points, image_points, self.K, self.camDist)
                 if (_):
-                    cv2.drawFrameAxes(self.color_frame, self.K, self.camDist, rvec, tvec, 0.05, 3)
+                    # cv2.drawFrameAxes(self.color_frame, self.K, self.camDist, rvec, tvec, 0.05, 3)
                     rvec = rvec.flatten()
                     tvec = tvec.flatten()
                     quat = Rotation.from_rotvec(rvec).as_quat()

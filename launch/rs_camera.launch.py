@@ -16,7 +16,9 @@ def generate_launch_description():
             ])
         ),
         launch_arguments={
-            'rgb_camera.color_profile': '640x480x30'
+            'rgb_camera.color_profile': '640x480x30',
+            'depth_module.depth_profile': '640x480x30',
+            'hole_filling_filter.enable': 'true'
         }.items()
     )
 

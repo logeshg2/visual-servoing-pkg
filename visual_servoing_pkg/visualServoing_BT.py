@@ -53,7 +53,7 @@ class visualServoingNode(Node):
         self.initializeArucoParameters()
 
         # socket (or holes) parameters
-        self.initializeSocketHolesParameters()
+        self.initializeExtBoxParameters()
 
         # filters initialization
         # moving average (for velocity)
@@ -74,8 +74,8 @@ class visualServoingNode(Node):
         # sub
         self.aruco_corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.data_read_group)
         self.aruco_pose_sub = self.create_subscription(Pose, "/aruco_pose", self.aruco_pose_sub_cb, 10, callback_group=self.data_read_group)
-        self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/holes_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
-        self.holes_pose_sub = self.create_subscription(Pose, "/holes_pose", self.socket_pose_cb, 10, callback_group=self.data_read_group)
+        self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/screws_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
+        self.holes_pose_sub = self.create_subscription(Pose, "/box_pose", self.box_pose_cb, 10, callback_group=self.data_read_group)
         self.servo_task_sub = self.create_subscription(String, "/servo_task", self.servo_task_cb, 1, callback_group=self.data_read_group)
         # pub
         self.conv_status_pub = self.create_publisher(String, "/converged_status", 1)
@@ -147,41 +147,41 @@ class visualServoingNode(Node):
         self.aruco_desiredIntMat = np.vstack(tempLst)
         self.aruco_currentIntMat = np.empty((8, 6))
 
-    def initializeSocketHolesParameters(self):
+    def initializeExtBoxParameters(self):
         """
-        Function to initialize and declare parameters related to socket hole servoing
-        Also computes desired interaction matrix for socket holes desired points
+        Function to initialize and declare parameters related to extension box screws servoing
+        Also computes desired interaction matrix for ext-box screws desired points
         """
         
-        self.holesTarZ = 0.208
-        self.socketPose = None
-        self.curSocketHoles = None
-        self.holesDepth = np.array([-1.0, -1.0, -1.0, -1.0, -1.0])
-        self.desSocketHoles = np.array([
-            [339, 213],
-            [317, 245],
-            [365, 243],
-            [315, 272],
-            [369, 270]
+        self.boxTarZ = 0.298
+        self.boxPose = None
+        self.curScrews = None
+        self.screwsDepth = np.array([-1.0, -1.0, -1.0, -1.0])
+        self.desiredScrew = np.array([
+            [219, 183],
+            [398, 183],
+            [398, 318],
+            [219, 320],
         ])
 
-        # socket holes object point
-        self.socket_object_points = np.array([
-            [0.0, -0.01075, 0],                     # NOTE: in here we need the pose of this point (1) - in pose estimation we omit this
-            [-0.00825, 0.0, 0],
-            [0.00825, 0.0, 0],
-            [-0.00955, 0.01075, 0],
-            [0.00955, 0.01075, 0]
+        # ext-box screws object point
+        width = 0.088
+        length = 0.068
+        self.box_object_points = np.array([
+            [-width/2, -length/2, 0],
+            [width/2, -length/2, 0],
+            [width/2, length/2, 0],
+            [-width/2, length/2, 0]
         ])
 
         # compute socket holes desired interaction matrix - 10x6 matrix
         tempLst = []
-        for u, v in self.desSocketHoles:
+        for u, v in self.desiredScrew:
             tempLst.append(
-                self.computeInteractionMatrix(u, v, self.holesTarZ)
+                self.computeInteractionMatrix(u, v, self.boxTarZ)
             )
-        self.holes_desiredIntMat = np.vstack(tempLst)
-        self.holes_currentIntMat = np.empty((10, 6))
+        self.box_desiredIntMat = np.vstack(tempLst)
+        self.box_currentIntMat = np.empty((8, 6))
 
     def servo_task_cb(self, msg):
         """Callback function to read servo task"""
@@ -216,26 +216,26 @@ class visualServoingNode(Node):
         else:
             self.arucoPose = None
 
-    def socket_pose_cb(self, msg):
-        """Callback function to read current socket holes pose"""
+    def box_pose_cb(self, msg):
+        """Callback function to read current ext-box pose"""
 
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
-            self.socketPose = np.eye(4)
-            self.socketPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
+            self.boxPose = np.eye(4)
+            self.boxPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
             rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
-            self.socketPose[0:3, 0:3] = rotm
+            self.boxPose[0:3, 0:3] = rotm
         else:
-            self.socketPose = None
+            self.boxPose = None
 
     def matched_points_cb(self, msg):
-        """Callback function to extract matched points (socket holes)"""
+        """Callback function to extract matched points (extension screws)"""
 
         if (msg.data is not None and (msg.data[0] != -1)):
-            # extract plug holes coordinates
-            self.curSocketHoles = np.array(msg.data).reshape((5, 2))
+            # extract ext-box screws's coordinates
+            self.curScrews = np.array(msg.data).reshape((4, 2))
         else:
-            self.curSocketHoles = None
+            self.curScrews = None
             # self.get_logger().warn(f"Matched points published are not enough!")
 
     def computeInteractionMatrix(self, u, v, Z):
@@ -391,7 +391,7 @@ class visualServoingNode(Node):
         """Function to compute camera velocity from pixel velocity"""
         
         # handle none cases
-        if ((self.servoTask == "servo_aruco" and self.curArucoCorners is None) or (self.servoTask == "servo_socket" and self.curSocketHoles is None)):
+        if ((self.servoTask == "servo_aruco" and self.curArucoCorners is None) or (self.servoTask == "servo_socket" and self.curScrews is None)):
             self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             return
 
@@ -409,19 +409,19 @@ class visualServoingNode(Node):
             # Approximation of Interaction Matrix - (8x6)
             self.approxIntMat = (self.aruco_currentIntMat + self.aruco_desiredIntMat) / 2
 
-        elif (self.servoTask == "servo_socket" and self.socketPose is not None):
+        elif (self.servoTask == "servo_socket" and self.boxPose is not None):
             # ibvs on socket
             # compute depth of socket holes
-            self.computeTargetDepth(self.socket_object_points, self.socketPose, self.holesDepth)
+            self.computeTargetDepth(self.box_object_points, self.boxPose, self.screwsDepth)
 
             # compute pixel velocities
-            self.pixelVel = self.computePixelVel(self.desSocketHoles, self.curSocketHoles)
+            self.pixelVel = self.computePixelVel(self.desiredScrew, self.curScrews)
 
             # compute current interaction matrix (feature jacobian)
-            self.holes_currentIntMat = self.computeCurrentInteractionMat(self.curSocketHoles, self.holesDepth)
+            self.box_currentIntMat = self.computeCurrentInteractionMat(self.curScrews, self.screwsDepth)
 
             # Approximation of Interaction Matrix - (8x6)
-            self.approxIntMat = (self.holes_currentIntMat + self.holes_desiredIntMat) / 2
+            self.approxIntMat = (self.box_currentIntMat + self.box_desiredIntMat) / 2
 
         # compute lambda for current pixelVel
         # Adaptive gain (lambda_adapt)
@@ -489,7 +489,7 @@ class visualServoingNode(Node):
         if (self.servoTask == "servo_aruco" and self.arucoPose is None):
             self.get_logger().warn(f"Aruco pose is none")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        elif (self.servoTask == "servo_socket" and self.socketPose is None):
+        elif (self.servoTask == "servo_socket" and self.boxPose is None):
             self.get_logger().warn(f"Socket pose is none")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         elif (self.servoTask == "servo_aruco" or self.servoTask == "servo_socket"):

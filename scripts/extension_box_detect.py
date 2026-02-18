@@ -261,6 +261,9 @@ class ScrewDetector(Node):
             xyxy_arr = result.boxes.xyxy.cpu().numpy()
             xywh_arr = result.boxes.xywh.cpu().numpy()
             
+            if (SAVE_MISSED):
+                tempImg = self.color_frame.copy()
+
             # plot desired holes coord
             for idx, xywh in enumerate(self.desiredScrews):
                 cv2.circle(self.color_frame, (int(xywh[0]), int(xywh[1])), 2, (0, 0, 255), -1)
@@ -298,7 +301,7 @@ class ScrewDetector(Node):
                 if (SAVE_MISSED):
                     # only save every 10 image
                     if (self.imgCount % 10 == 0):
-                        cv2.imwrite(f"/home/logesh/no_detect_data/img_{self.imgCount}.png", self.color_frame)
+                        cv2.imwrite(f"/home/logesh/no_detect_data/img_{self.imgCount}.png", tempImg)
                     self.imgCount += 1
 
                 # no enough point to compute

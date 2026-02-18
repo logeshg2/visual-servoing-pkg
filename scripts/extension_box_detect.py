@@ -2,7 +2,8 @@
 
 """
 This is a ros2 node that read current image from the sensor and processes the image.
-The script uses YOLO from Ultralytics pkg with fine-tuned weights to detect holes in the query image.
+The script uses YOLO from Ultralytics pkg with fine-tuned weights to detect screw in the query image.
+Using PnP pose of the extension box is also identified.
 """
 
 import cv2
@@ -32,7 +33,7 @@ class labels:
 
 class HoleDetector(Node):
     def __init__(self):
-        super().__init__("hole_detector_node")
+        super().__init__("ext_box_detector_node")
 
         self.color_frame = None
         self.depth_frame = None
@@ -60,24 +61,26 @@ class HoleDetector(Node):
         self.get_logger().info(f"Image frame width: {self.frame_width}")
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
-        # yolo hole detector model setup
-        self.holes = None
-        self.holesPose = None
+        # yolo screw + box model setup
+        self.screws = None
+        self.boxPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/screw_best.pt")
-        self.desiredHoles = np.array([
+        self.desiredScrews = np.array([
             [339, 213],
             [317, 245],
             [365, 243],
             [315, 272],
-            [369, 270]
         ])
-        # object points
-        self.object_points = np.array([
-            # [0.0, -0.01075, 0],
-            [-0.00825, 0.0, 0],
-            [0.00825, 0.0, 0],
-            [-0.00955, 0.01075, 0],
-            [0.00955, 0.01075, 0]
+        self.prev_rvec = None
+        self.prev_tvec = None
+        # ext-box dim
+        width = 0.088
+        length = 0.068
+        self.objectPoints = np.array([
+            [-width/2, -length/2, 0],
+            [width/2, -length/2, 0],
+            [width/2, length/2, 0],
+            [-width/2, length/2, 0]
         ])
 
         # ros2 communication variables
@@ -85,11 +88,11 @@ class HoleDetector(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         self.img_group = MutuallyExclusiveCallbackGroup()
         self.img_publisher = self.create_publisher(Image, "/processed_image_1", 10, callback_group=self.img_group)
-        self.depthImg_publisher = self.create_publisher(Image, "/depth_image", 10, callback_group=self.img_group)
-        self.matchPoints_publisher = self.create_publisher(Int64MultiArray, "/holes_coord", 10, callback_group=self.img_group)
+        # self.depthImg_publisher = self.create_publisher(Image, "/depth_image", 10, callback_group=self.img_group)
+        self.matchPoints_publisher = self.create_publisher(Int64MultiArray, "/screws_coord", 10, callback_group=self.img_group)
         self.rs_color_sub = self.create_subscription(Image, "/camera/camera/color/image_raw", self.rs_color_cb, 10, callback_group=self.img_group)
         self.rs_depth_sub = self.create_subscription(Image, "/camera/camera/depth/image_rect_raw", self.rs_depth_cb, 10, callback_group=self.img_group)
-        self.holesPose_pub = self.create_publisher(Pose, "/holes_pose", 10)
+        self.boxPose_pub = self.create_publisher(Pose, "/box_pose", 10)
 
         # image reader timer
         # self.img_reader_timer = self.create_timer(1/20, self.image_reader_timer, callback_group=self.img_group)     # 20 hz
@@ -239,14 +242,14 @@ class HoleDetector(Node):
             for idx, xy in enumerate(screwArr):
                 cv2.circle(self.color_frame, (int(xy[0]), int(xy[1])), 5, (0, 255, 0), -1)
 
-        self.holes = screwArr
+        self.screws = screwArr
 
             
     def processImage(self):
         """Function to process image and find feature points"""
         
         if (self.color_frame is None):
-            self.holes = None
+            self.screws = None
             return
         
         try:
@@ -257,7 +260,7 @@ class HoleDetector(Node):
             xywh_arr = result.boxes.xywh.cpu().numpy()
             
             # plot desired holes coord
-            for idx, xywh in enumerate(self.desiredHoles):
+            for idx, xywh in enumerate(self.desiredScrews):
                 cv2.circle(self.color_frame, (int(xywh[0]), int(xywh[1])), 2, (0, 0, 255), -1)
 
             if (len(classes) >= 6):
@@ -265,26 +268,38 @@ class HoleDetector(Node):
                 self.solveCorrespondence(classes, xyxy_arr, xywh_arr)
 
                 # compute pose
-                # image_points = np.float64(self.holes[1:, :])        # remove point 1
-                # _, rvec, tvec, inliers = cv2.solvePnPRansac(self.object_points, image_points, self.K, self.camDist)
-                # if (_):
-                #     # cv2.drawFrameAxes(self.color_frame, self.K, self.camDist, rvec, tvec, 0.05, 3)
-                #     rvec = rvec.flatten()
-                #     tvec = tvec.flatten()
-                #     quat = Rotation.from_rotvec(rvec).as_quat()
-                #     self.holesPose = {'tvec': tvec, 'quat': quat}
-                # else:
-                #     self.holesPose = None
+                imagePoints = np.float64(self.screws)        # remove point 1
+
+                # 1st iteration
+                if (self.prev_rvec is None):
+                    success, rvec, tvec = cv2.solvePnP(self.objectPoints, imagePoints, self.K, self.camDist, flags=cv2.SOLVEPNP_IPPE)
+                else:
+                    success, rvec, tvec = cv2.solvePnP(self.objectPoints, imagePoints, self.K, self.camDist, self.prev_rvec, self.prev_tvec, useExtrinsicGuess=True,flags=cv2.SOLVEPNP_IPPE)
+                self.prev_rvec = rvec
+                self.prev_tvec = tvec
+                
+                if tvec[2] < 0.05:   # less than 5 cm
+                    print("Rejected unstable pose")
+                    success = False
+
+                if (success):
+                    cv2.drawFrameAxes(self.color_frame, self.K, self.camDist, rvec, tvec, 0.05, 3)
+                    rvec = rvec.flatten()
+                    tvec = tvec.flatten()
+                    quat = Rotation.from_rotvec(rvec).as_quat()
+                    self.boxPose = {'tvec': tvec, 'quat': quat}
+                else:
+                    self.boxPose = None
             else:
                 # no enough point to compute
-                self.holes = None
-                self.holesPose = None
+                self.screws = None
+                self.boxPose = None
                 pass
 
         except Exception as e:
             self.get_logger().warn(f"Exception occured: {e}")
-            self.holes = None
-            self.holesPose = None
+            self.screws = None
+            self.boxPose = None
 
     def image_reader_timer(self):
         try:
@@ -311,34 +326,34 @@ class HoleDetector(Node):
         self.processImage()
 
         # publish matched poin (if available)
-        if (self.holes is not None):
+        if (self.screws is not None):
             msg1 = Int64MultiArray()
-            msg1.data = self.holes.flatten().tolist()
+            msg1.data = self.screws.flatten().tolist()
             self.matchPoints_publisher.publish(msg1)
 
-            # hole pose
-            # if (self.holesPose is not None):
-            #     msg = Pose()
-            #     msg.position.x = self.holesPose['tvec'][0]
-            #     msg.position.y = self.holesPose['tvec'][1]
-            #     msg.position.z = self.holesPose['tvec'][2]
-            #     msg.orientation.x = self.holesPose['quat'][0]
-            #     msg.orientation.y = self.holesPose['quat'][1]
-            #     msg.orientation.z = self.holesPose['quat'][2]
-            #     msg.orientation.w = self.holesPose['quat'][3]
-            #     self.holesPose_pub.publish(msg)
-            # else:
-            #     msg = Pose()
-            #     msg.position.x = -1.0
-            #     self.holesPose_pub.publish(msg)
+            # box pose
+            if (self.boxPose is not None):
+                msg = Pose()
+                msg.position.x = self.boxPose['tvec'][0]
+                msg.position.y = self.boxPose['tvec'][1]
+                msg.position.z = self.boxPose['tvec'][2]
+                msg.orientation.x = self.boxPose['quat'][0]
+                msg.orientation.y = self.boxPose['quat'][1]
+                msg.orientation.z = self.boxPose['quat'][2]
+                msg.orientation.w = self.boxPose['quat'][3]
+                self.boxPose_pub.publish(msg)
+            else:
+                msg = Pose()
+                msg.position.x = -1.0
+                self.boxPose_pub.publish(msg)
         else:
             msg1 = Int64MultiArray()
             msg1.data = [-1]
             self.matchPoints_publisher.publish(msg1)
 
-            # msg = Pose()
-            # msg.position.x = -1.0
-            # self.holesPose_pub.publish(msg)
+            msg = Pose()
+            msg.position.x = -1.0
+            self.boxPose_pub.publish(msg)
 
         if (self.color_frame is None):
             return
@@ -347,8 +362,8 @@ class HoleDetector(Node):
         msg = self.cvBridge.cv2_to_imgmsg(self.color_frame, encoding="bgr8")
         self.img_publisher.publish(msg)
         # publish depth image
-        msg = self.cvBridge.cv2_to_imgmsg(self.depth_frame)
-        self.depthImg_publisher.publish(msg)
+        # msg = self.cvBridge.cv2_to_imgmsg(self.depth_frame)
+        # self.depthImg_publisher.publish(msg)
 
 
 def main():

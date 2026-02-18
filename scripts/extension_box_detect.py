@@ -30,8 +30,9 @@ class labels:
     box = 1
     screw = 2
 
+SAVE_MISSED = False
 
-class HoleDetector(Node):
+class ScrewDetector(Node):
     def __init__(self):
         super().__init__("ext_box_detector_node")
 
@@ -41,6 +42,7 @@ class HoleDetector(Node):
         self.frame_width = 640
         self.frame_height = 480
         self.frame_center = np.array([int(self.frame_width // 2), int(self.frame_height // 2)])
+        self.imgCount = 0
 
         # realsense sdk setup
         self.pipeline = None
@@ -66,10 +68,10 @@ class HoleDetector(Node):
         self.boxPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/screw_best.pt")
         self.desiredScrews = np.array([
-            [339, 213],
-            [317, 245],
-            [365, 243],
-            [315, 272],
+            [219, 183],
+            [398, 183],
+            [398, 318],
+            [219, 320],
         ])
         self.prev_rvec = None
         self.prev_tvec = None
@@ -254,7 +256,7 @@ class HoleDetector(Node):
         
         try:
             # detect the holes
-            result = self.model.predict(self.color_frame, stream=False, save=False)[0]
+            result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.7)[0]
             classes = result.boxes.cls.cpu().numpy()
             xyxy_arr = result.boxes.xyxy.cpu().numpy()
             xywh_arr = result.boxes.xywh.cpu().numpy()
@@ -291,6 +293,14 @@ class HoleDetector(Node):
                 else:
                     self.boxPose = None
             else:
+
+                # save data (missed detection)
+                if (SAVE_MISSED):
+                    # only save every 10 image
+                    if (self.imgCount % 10 == 0):
+                        cv2.imwrite(f"/home/logesh/no_detect_data/img_{self.imgCount}.png", self.color_frame)
+                    self.imgCount += 1
+
                 # no enough point to compute
                 self.screws = None
                 self.boxPose = None
@@ -369,12 +379,12 @@ class HoleDetector(Node):
 def main():
     rclpy.init()
 
-    # try:
-    node = HoleDetector()
-    rclpy.spin(node)
-    # except Exception as e:
-        # print(f"Shutting down node:\nException: {e}")
-        # node.destroy_node()
+    try:
+        node = ScrewDetector()
+        rclpy.spin(node)
+    except Exception as e:
+        print(f"Shutting down node:\nException: {e}")
+        node.destroy_node()
         # node.pipeline.stop()
         # rclpy.shutdown()
 

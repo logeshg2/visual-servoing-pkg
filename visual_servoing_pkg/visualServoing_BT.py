@@ -153,15 +153,15 @@ class visualServoingNode(Node):
         Also computes desired interaction matrix for ext-box screws desired points
         """
         
-        self.boxTarZ = 0.298
+        self.boxTarZ = 0.2011
         self.boxPose = None
         self.curScrews = None
         self.screwsDepth = np.array([-1.0, -1.0, -1.0, -1.0])
         self.desiredScrew = np.array([
-            [219, 183],
-            [398, 183],
-            [398, 318],
-            [219, 320],
+            [184, 147],
+            [450, 147],
+            [449, 347],
+            [184, 349],
         ])
 
         # ext-box screws object point

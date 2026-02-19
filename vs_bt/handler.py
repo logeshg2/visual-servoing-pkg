@@ -57,6 +57,20 @@ class Handler(py_trees.behaviour.Behaviour):
         self.pTpa_safe = np.eye(4)
         self.pTpa_safe[0:3, 3] = np.array([0.0, 0.0, -0.04])
 
+
+        # box conv to insert above
+        self.bcTia = np.eye(4)
+        self.bcTia[0:3, 3] = np.array([0.06289426, -0.02071626,  0.07633251])
+        self.bcTia[0:3, 0:3] = Rotation.from_euler("xyz", [3.81658362e-04, -1.56423169e-03,  3.92872137e-05], degrees=True).as_matrix()
+
+        # insert above to insert
+        self.iaTi = np.eye(4)
+        self.iaTi[0:3, 3] = np.array([0.0, 0.0, 0.029])
+
+        # insert to insert above (safe height)
+        self.iTia_safe = np.eye(4)
+        self.iTia_safe[0:3, 3] = np.array([0.0, 0.0, -0.05])
+
     def initialise(self):
         """Read blackboard"""
 
@@ -186,25 +200,13 @@ class Handler(py_trees.behaviour.Behaviour):
                     bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
                     bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
 
-                    # socket to grip pose
-                    sTo = np.eye(4)
-                    sTo[0:3, 3] = np.array([0.0, 0.0, -0.06 ])
-                    sTo[0:3, 0:3] = Rotation.from_euler("xyz", (0, 0, -90), degrees=True).as_matrix()
-                    # camera to grip pose (self.socketPose -> sTa)
-                    cTo = self.holesPose @ sTo
-
-                    # ee to grip pose
-                    eTo = self.eTc @ cTo
-                    eTo[2, 3] -= 0.110
-
-                    # base to object pose
-                    bTo = bTe @ eTo
+                    # target ee pose (after static transformation)
+                    bTe_tar = bTe @ self.bcTia
 
                     # compute pose as list
                     cartPose = np.empty(6)
-                    cartPose[0:3] = bTo[0:3, 3] * 1000
-                    cartPose[3:6] = Rotation.from_matrix(bTo[0:3, 0:3]).as_euler("xyz", degrees=True)
-                    cartPose[3:5] = np.array([-179.9, 0.0])     # assuming the plug is perpendicular
+                    cartPose[0:3] = bTe_tar[0:3, 3] * 1000
+                    cartPose[3:6] = Rotation.from_matrix(bTe_tar[0:3, 0:3]).as_euler("xyz", degrees=True)
 
                     # perform motion
                     self.blackboard.set("tarCartPos", cartPose)
@@ -216,9 +218,79 @@ class Handler(py_trees.behaviour.Behaviour):
                 
                 elif (self.opr_count == 1):
                     # perform insertion
-                    self.logger.info(f"Reached insertion point!")
+                    # current base to ee pose
+                    curPose = self.bot.read_current_cartesian_pose()
+                    bTe = np.eye(4)
+                    bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
+                    bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
+                    
+                    # target ee pose (after static transformation)
+                    bTe_tar = bTe @ self.iaTi
 
-                    return py_trees.common.Status.RUNNING
+                    # compute pose as list
+                    cartPose = np.empty(6)
+                    cartPose[0:3] = bTe_tar[0:3, 3] * 1000
+                    cartPose[3:6] = Rotation.from_matrix(bTe_tar[0:3, 0:3]).as_euler("xyz", degrees=True)
+
+                    # perform motion
+                    self.blackboard.set("tarCartPos", cartPose)
+                    self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+
+                    self.opr_count += 1
+
+                    return py_trees.common.Status.SUCCESS
+                
+                elif (self.opr_count == 2):
+                    # open gripper
+                    self.bot.air_gripper_control("open")
+                    
+                    self.opr_count += 1
+
+                    return py_trees.common.Status.SUCCESS
+                
+                elif (self.opr_count == 3):
+                    # current base to ee pose
+                    curPose = self.bot.read_current_cartesian_pose()
+                    bTe = np.eye(4)
+                    bTe[0:3, 3] = np.array(curPose[0:3]) / 1000.0
+                    bTe[0:3, 0:3] = Rotation.from_euler("xyz", np.array(curPose[3:6]), degrees=True).as_matrix()
+                    
+                    # target ee pose (after static transformation)
+                    bTe_tar = bTe @ self.iTia_safe
+
+                    # compute pose as list
+                    cartPose = np.empty(6)
+                    cartPose[0:3] = bTe_tar[0:3, 3] * 1000
+                    cartPose[3:6] = Rotation.from_matrix(bTe_tar[0:3, 0:3]).as_euler("xyz", degrees=True)
+                
+                    # perform motion
+                    self.blackboard.set("tarCartPos", cartPose)
+                    self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+
+                    self.opr_count += 1
+
+                    return py_trees.common.Status.SUCCESS
+
+                elif (self.opr_count == 4):
+                    # go back to tracking position
+                    tracking_pos = self.blackboard.get("tracking_pose")
+                    self.blackboard.set("controlMode", ControlType.cartPosCtrl)
+                    self.blackboard.set("tarCartPos", tracking_pos)
+
+                    self.opr_count += 1
+
+                    return py_trees.common.Status.SUCCESS
+
+                else:
+                    # picking operation is over
+                    self.performAlignment = False
+                    # self.converged = False
+                    self.blackboard.set("performAlignment", self.performAlignment)
+                    # self.blackboard.set("converged", self.converged)
+
+                    # operation over
+                    self.logger.info(f"Plug insertion operation is over.")
+                    exit(0)
 
 
         if ((self.triggered and not self.moveToTracking) and (not self.servoAruco and not self.servoSocket)):

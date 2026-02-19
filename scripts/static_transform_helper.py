@@ -11,11 +11,11 @@ from scipy.spatial.transform import Rotation
 if __name__ == "__main__":
 
     bTe1 = np.eye(4)
-    bTe1[0:3, 3] = np.array([93.54667663574219, 312.555908203125, -21.916120529174805]) / 1000
-    bTe1[0:3, 0:3] = Rotation.from_euler("xyz", [175.60801696777344, -0.1113772913813591, 100.841552734375], degrees=True).as_matrix()
+    bTe1[0:3, 3] = np.array([126.13108825683594, 242.6962432861328, -34.67491149902344]) / 1000
+    bTe1[0:3, 0:3] = Rotation.from_euler("xyz", [179.2032470703125, 0.17680034041404724, 81.62097930908203], degrees=True).as_matrix()
     bTe2 = np.eye(4)
-    bTe2[0:3, 3] = np.array([65.13397216796875, 334.2900085449219, -103.98701477050781]) / 1000
-    bTe2[0:3, 0:3] = Rotation.from_euler("xyz", [179.27284240722656, -1.7047703266143799, 94.56122589111328], degrees=True).as_matrix()
+    bTe2[0:3, 3] = np.array([115.81856536865234, 307.5487976074219, -111.48181915283203]) / 1000
+    bTe2[0:3, 0:3] = Rotation.from_euler("xyz", [179.20362854003906, 0.1783638745546341, 81.62091827392578], degrees=True).as_matrix()
     e1Te2 = np.linalg.inv(bTe1) @ bTe2
 
     print()

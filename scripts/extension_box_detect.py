@@ -68,10 +68,10 @@ class ScrewDetector(Node):
         self.boxPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/screw_best.pt")
         self.desiredScrews = np.array([
-            [219, 183],
-            [398, 183],
-            [398, 318],
-            [219, 320],
+            [184, 147],
+            [450, 147],
+            [449, 347],
+            [184, 349],
         ])
         self.prev_rvec = None
         self.prev_tvec = None
@@ -242,7 +242,7 @@ class ScrewDetector(Node):
             screwArr = np.int64([screw_xy[pt1_idx], screw_xy[pt2_idx], screw_xy[pt3_idx], screw_xy[pt4_idx]])
 
             for idx, xy in enumerate(screwArr):
-                cv2.circle(self.color_frame, (int(xy[0]), int(xy[1])), 5, (0, 255, 0), -1)
+                cv2.circle(self.color_frame, (int(xy[0]), int(xy[1])), 2, (0, 255, 0), -1)
 
         self.screws = screwArr
 
@@ -256,7 +256,7 @@ class ScrewDetector(Node):
         
         try:
             # detect the holes
-            result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.7)[0]
+            result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.3, imgsz=320)[0]
             classes = result.boxes.cls.cpu().numpy()
             xyxy_arr = result.boxes.xyxy.cpu().numpy()
             xywh_arr = result.boxes.xywh.cpu().numpy()

@@ -92,12 +92,12 @@ class IBVS_extension_box(Node):
         self.cv_bridge = CvBridge()
 
         # compute desired interaction matrix - this will be constant
-        self.refDepth = 0.298
+        self.refDepth = 0.2011
         self.desiredScrew = np.array([
-            [219, 183],
-            [398, 183],
-            [398, 318],
-            [219, 320],
+            [184, 147],
+            [450, 147],
+            [449, 347],
+            [184, 349],
         ])
         # ext-box dim
         width = 0.088

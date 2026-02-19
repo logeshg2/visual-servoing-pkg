@@ -5,11 +5,30 @@
 import rclpy
 import py_trees
 import numpy as np
-from handler import Handler
+
 from ros2_reader import ReadfromROS
 from check_motion import CheckMovement
-from move_arm import MoveArm, ControlType
-from visual_servoing import VisualServoing
+from moveToTracking import move2Tracking
+from gripperBehaviour import openGripper, closeGripper
+from arucoServoBehaviour import (
+    startArucoServo,
+    servoArucoUntilConv,
+    stopArucoServo,
+    # pick behaviours
+    moveAbovePick,
+    moveDownPick,
+    moveUpSafe
+)
+from socketServoBehaviour import (
+    startSocketServo,
+    servoSocketUntilConv,
+    stopSocketServo,
+    # insert behaviours
+    moveAboveInsert,
+    moveDownInsert,
+    moveUpSafe_insert
+)
+
 from ComDependencies.robot_controller import robot
 
 
@@ -20,20 +39,82 @@ def setBlackboard(blackboard):
     
     blackboard.set("tracking_pose", tracking_pose)
 
+
+def create_root(rosNode, realRobot):
+    """Function that create a root and initializes the entire behaviour tree."""
+
+    # pick and insert sub-trees
+    pickSubtree = py_trees.composites.Sequence("Pick Subtree", memory=True)
+    pickStaticMovements = py_trees.composites.Sequence("Pick Static Movements", memory=True)
+    insertSubtree = py_trees.composites.Sequence("Insert Subtree", memory=True)
+    insertStaticMovements = py_trees.composites.Sequence("Insert Static Movements", memory=True)
+
+    # pick subtree
+    pickStaticMovements.add_children([
+        moveAbovePick(realRobot),
+        moveDownPick(realRobot),
+        closeGripper(realRobot),
+        moveUpSafe(realRobot),
+        move2Tracking(realRobot, look_for_trigger=False)
+    ])
+    pickSubtree.add_children([
+        startArucoServo(),
+        servoArucoUntilConv(),
+        stopArucoServo(),
+        pickStaticMovements
+    ])
+
+    # insert subtree
+    insertStaticMovements.add_children([
+        moveAboveInsert(realRobot),
+        moveDownInsert(realRobot),
+        openGripper(realRobot),
+        moveUpSafe_insert(realRobot),
+        move2Tracking(realRobot, look_for_trigger=False)
+    ])
+    insertSubtree.add_children([
+        startSocketServo(),
+        servoSocketUntilConv(),
+        stopSocketServo(),
+        insertStaticMovements
+    ])
+
+    # high level composites
+    systemMonitor = py_trees.composites.Parallel("System Monitor", policy=py_trees.common.ParallelPolicy.SuccessOnAll())
+    taskSequence = py_trees.composites.Sequence("Task Sequence", memory=True)
+
+    # system monitor
+    systemMonitor.add_children([
+        ReadfromROS(rosNode),
+        CheckMovement(realRobot)
+    ])
+
+    # task sequence
+    taskSequence.add_children([
+        move2Tracking(realRobot, look_for_trigger=True),
+        openGripper(realRobot),
+        pickSubtree,
+        insertSubtree
+    ])
+
+    # main root
+    root = py_trees.composites.Parallel("Root", policy=py_trees.common.ParallelPolicy.SuccessOnOne())   # if the task sequence is SUCCESS - stops BT
+    
+    root.add_children([
+        systemMonitor,
+        taskSequence
+    ])
+
+    return root
+
+
 def main():
     rclpy.init()
-    node = rclpy.create_node("simple_node")
+    rosNode = rclpy.create_node("simple_node")
     realRobot = robot("192.168.1.9")
 
-    # initialize root
-    root = py_trees.composites.Sequence("root", memory=False)
-    read_from_ros = ReadfromROS(node)
-    course_handler = Handler(realRobot)
-    check_movement = CheckMovement(realRobot)
-    # visual_servoing = VisualServoing()
-    move_arm = MoveArm(realRobot, ControlType.camVelCtrl)
-    # construct root + tree
-    root.add_children([read_from_ros, check_movement, course_handler, move_arm])
+    # create root (+ entire BT)
+    root = create_root(rosNode, realRobot)
 
     # initialize tree
     behaviour_tree = py_trees.trees.BehaviourTree(root=root)
@@ -50,7 +131,7 @@ def main():
 
     try:
         behaviour_tree.tick_tock(
-            period_ms=5,
+            period_ms=20,
             number_of_iterations=py_trees.trees.CONTINUOUS_TICK_TOCK,
             pre_tick_handler=None,
             post_tick_handler=print_tree,

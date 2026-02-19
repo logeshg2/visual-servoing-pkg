@@ -13,7 +13,7 @@ import rclpy
 from cv_bridge import CvBridge
 from std_msgs.msg import String
 from std_srvs.srv import SetBool
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup
 
 
 class ReadfromROS(py_trees.behaviour.Behaviour):
@@ -54,8 +54,8 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         """Callback function to read convergence status from ros2 vs node"""
 
         if (msg.data is not None):
-            self.converged_aruco = True if (msg.data == "1_aruco") else False
-            self.converged_socket = True if (msg.data == "1_socket") else False
+            self.converged_aruco = (msg.data == "1_aruco")
+            self.converged_socket = (msg.data == "1_socket")
         else:
             self.converged = False
 
@@ -69,13 +69,11 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
         response.message = "trigger successful"
         return response
 
-    def initialise(self):
-        """Read from bt - that needs to be updated to ros2 nodes"""
-
-        self.servoTask = self.blackboard.get("servoTask")
-
     def update(self):
         """Update blackboard"""
+        
+        self.servoTask = self.blackboard.get("servoTask")
+        
         try:
             rclpy.spin_once(self.node, timeout_sec=0.0)
 
@@ -89,10 +87,7 @@ class ReadfromROS(py_trees.behaviour.Behaviour):
             msg.data = self.servoTask
             self.servo_task_pub.publish(msg)
 
-            return py_trees.common.Status.SUCCESS
+            return py_trees.common.Status.RUNNING       # parallel - continue to read data from ros
         except Exception as e:
             self.node.get_logger().warn(f"Exceptino while updating blackboard: {e}")
             return py_trees.common.Status.FAILURE
-
-    # def terminate(self):
-    #     pass

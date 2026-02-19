@@ -465,14 +465,21 @@ class visualServoingNode(Node):
         
         # handle convergence
         if (self.converged == True):
-            self.get_logger().info(f"Visual servoing converged: {self.converged}")
+            self.get_logger().info(f"Visual servoing converged ({self.servoTask}): {self.converged}")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             if (self.servoTask == "servo_aruco"):
                 self.aruco_conv = True
                 self.socket_conv = False
-            else:
+            elif (self.servoTask == "servo_socket"):
                 self.socket_conv = True
                 self.aruco_conv = False
+            else:
+                self.aruco_conv = False
+                self.socket_conv = False
+            self.servoTask = "no_servo"
+        else:
+            self.aruco_conv = False
+            self.socket_conv = False
             self.servoTask = "no_servo"
 
         # publish convergence status

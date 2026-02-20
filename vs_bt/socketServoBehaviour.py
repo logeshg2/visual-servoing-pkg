@@ -89,12 +89,18 @@ class moveAboveInsert(py_trees.behaviour.Behaviour):
         self.bot = realRobot
         self.isMoving = None
         self.goal_sent = False
+        self.targetPosition = None
+
+        self.waitTime = 2.0
+        self.startTime = None
 
         self.blackboard = py_trees.blackboard.Blackboard()
     
     def initialise(self):
         
         self.goal_sent = False
+        self.startTime = None
+        self.targetPosition = None
         self.isMoving = self.blackboard.get("isMoving")
 
     def update(self):
@@ -118,16 +124,30 @@ class moveAboveInsert(py_trees.behaviour.Behaviour):
 
             self.bot.write_cartesian_position(coords=cartPose, blocking=False)
             self.goal_sent = True
+            self.targetPosition = np.array(cartPose)
+            self.startTime = time.time()
 
             return py_trees.common.Status.RUNNING
         
+        # wait
+        if (time.time() - self.startTime) < self.waitTime:
+            self.logger.error("Wait for 2 seconds here")
+            return py_trees.common.Status.RUNNING
+
         # check motion
         if (self.isMoving == True):     
             self.logger.info(f"Arm moving to insert above pose")
             return py_trees.common.Status.RUNNING
-        else:
-            self.logger.info(f"Arm reached insert above pose!")
-            return py_trees.common.Status.SUCCESS
+        
+        # check whether the arm reached target position
+        curPose = np.array(self.bot.read_current_cartesian_pose())
+        if (np.linalg.norm(curPose - self.targetPosition, ord=np.inf) > 2.0):        # giving 2.0 mm tolerance
+            self.logger.warning("Position did not reach! again sending goal")
+            self.goal_sent = False
+            return py_trees.common.Status.RUNNING
+
+        self.logger.info(f"Arm reached insert above pose!")
+        return py_trees.common.Status.SUCCESS
 
 
 class moveDownInsert(py_trees.behaviour.Behaviour):
@@ -142,12 +162,18 @@ class moveDownInsert(py_trees.behaviour.Behaviour):
         self.bot = realRobot
         self.isMoving = None
         self.goal_sent = False
+        self.targetPosition = None
+
+        self.waitTime = 2.0
+        self.startTime = None
 
         self.blackboard = py_trees.blackboard.Blackboard()
     
     def initialise(self):
         
         self.goal_sent = False
+        self.startTime = None
+        self.targetPosition = None
         self.isMoving = self.blackboard.get("isMoving")
 
     def update(self):
@@ -171,16 +197,28 @@ class moveDownInsert(py_trees.behaviour.Behaviour):
 
             self.bot.write_cartesian_position(coords=cartPose, blocking=False)
             self.goal_sent = True
+            self.targetPosition = np.array(cartPose)
+            self.startTime = time.time()
 
             return py_trees.common.Status.RUNNING
         
+        if (time.time() - self.startTime) < self.waitTime:
+            return py_trees.common.Status.RUNNING
+
         # check motion
         if (self.isMoving == True):     
             self.logger.info(f"Arm moving to insert pose")
             return py_trees.common.Status.RUNNING
-        else:
-            self.logger.info(f"Arm reached insert pose!")
-            return py_trees.common.Status.SUCCESS
+        
+        # check whether the arm reached target position
+        curPose = np.array(self.bot.read_current_cartesian_pose())
+        if (np.linalg.norm(curPose - self.targetPosition, ord=np.inf) > 2.0):        # giving 2.0 mm tolerance
+            self.logger.warning("Position did not reach! again sending goal")
+            self.goal_sent = False
+            return py_trees.common.Status.RUNNING
+
+        self.logger.info(f"Arm reached insert pose!")
+        return py_trees.common.Status.SUCCESS
 
 
 class moveUpSafe_insert(py_trees.behaviour.Behaviour):
@@ -195,12 +233,18 @@ class moveUpSafe_insert(py_trees.behaviour.Behaviour):
         self.bot = realRobot
         self.isMoving = None
         self.goal_sent = False
+        self.targetPosition = None
+
+        self.waitTime = 2.0
+        self.startTime = None
 
         self.blackboard = py_trees.blackboard.Blackboard()
     
     def initialise(self):
         
         self.goal_sent = False
+        self.startTime = None
+        self.targetPosition = None
         self.isMoving = self.blackboard.get("isMoving")
 
     def update(self):
@@ -224,13 +268,26 @@ class moveUpSafe_insert(py_trees.behaviour.Behaviour):
 
             self.bot.write_cartesian_position(coords=cartPose, blocking=False)
             self.goal_sent = True
+            self.targetPosition = np.array(cartPose)
+            self.startTime = time.time()
 
             return py_trees.common.Status.RUNNING
         
+        # wait
+        if (time.time() - self.startTime) < self.waitTime:
+            return py_trees.common.Status.RUNNING
+
         # check motion
         if (self.isMoving == True):     
             self.logger.info(f"Arm moving to insert above safe pose")
             return py_trees.common.Status.RUNNING
-        else:
-            self.logger.info(f"Arm reached insert above safe pose!")
-            return py_trees.common.Status.SUCCESS
+        
+        # check whether the arm reached target position
+        curPose = np.array(self.bot.read_current_cartesian_pose())
+        if (np.linalg.norm(curPose - self.targetPosition, ord=np.inf) > 2.0):        # giving 2.0 mm tolerance
+            self.logger.warning("Position did not reach! again sending goal")
+            self.goal_sent = False
+            return py_trees.common.Status.RUNNING
+
+        self.logger.info(f"Arm reached insert above safe pose!")
+        return py_trees.common.Status.SUCCESS

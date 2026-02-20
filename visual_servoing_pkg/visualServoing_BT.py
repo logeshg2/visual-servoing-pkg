@@ -480,7 +480,7 @@ class visualServoingNode(Node):
         else:
             self.aruco_conv = False
             self.socket_conv = False
-            self.servoTask = "no_servo"
+            # self.servoTask = "no_servo"
 
         # publish convergence status
         conv_msg = String()

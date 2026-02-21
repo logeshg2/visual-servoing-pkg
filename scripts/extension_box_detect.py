@@ -338,7 +338,15 @@ class ScrewDetector(Node):
         # process the image (feature detection and processing)
         self.processImage()
 
-        # publish matched poin (if available)
+        # plot reference camera frame
+        # mark center of the frame
+        cv2.line(self.color_frame, (self.frame_center[0]-10, self.frame_center[1]-10), (self.frame_center[0]+10, self.frame_center[1]+10), (255,0,0), 2)
+        cv2.line(self.color_frame, (self.frame_center[0]-10, self.frame_center[1]+10), (self.frame_center[0]+10, self.frame_center[1]-10), (255,0,0), 2)
+        # mark xy image plane
+        cv2.arrowedLine(self.color_frame, self.frame_center, [self.frame_center[0] + 100, self.frame_center[1]], (0,0,255), 2)     # X
+        cv2.arrowedLine(self.color_frame, self.frame_center, [self.frame_center[0], self.frame_center[1] + 100], (0,255,0), 2)     # Y
+
+        # publish matched point (if available)
         if (self.screws is not None):
             msg1 = Int64MultiArray()
             msg1.data = self.screws.flatten().tolist()

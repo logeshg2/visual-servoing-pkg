@@ -31,10 +31,10 @@ class IBVS_aruco(Node):
         self.cur_bottom_right = None
         self.cur_bottom_left = None
         # target aruco points
-        self.tar_top_left = np.array([202, 119])
-        self.tar_top_right = np.array([438, 118])
-        self.tar_bottom_right = np.array([439, 355])
-        self.tar_bottom_left = np.array([203, 355])
+        self.tar_top_left = np.array([270, 196])
+        self.tar_top_right = np.array([363, 196])
+        self.tar_bottom_right = np.array([363, 288])
+        self.tar_bottom_left = np.array([270, 289])
         self.tar_Z = 0.372        # 30 cm above the board
         # aruco pose variable
         self.arucoPose = None
@@ -360,7 +360,7 @@ class IBVS_aruco(Node):
     
     def computeEEVel(self):
         # check aruco corners detection
-        if (self.cur_top_left is not None and self.cur_top_left[0] != -1):
+        if (self.arucoPose is not None and (self.cur_top_left is not None and self.cur_top_left[0] != -1)):
             # compute desired camera velocity
             self.curCamVel = self.computeCamVel()
             # self.get_logger().info(f"Computed Cam velocity: {self.curCamVel}")
@@ -484,12 +484,12 @@ class IBVS_aruco(Node):
 def main():
     rclpy.init()
 
-    try:
-        node = IBVS_aruco()
-        rclpy.spin(node)
-    except Exception as e:
-        print(f"Shutting down IBVS node:\nException: {e}")
-        node.destroy_node()
+    # try:
+    node = IBVS_aruco()
+    rclpy.spin(node)
+    # except Exception as e:
+    #     print(f"Shutting down IBVS node:\nException: {e}")
+    #     node.destroy_node()
         # rclpy.shutdown()
 
 if __name__ == "__main__":

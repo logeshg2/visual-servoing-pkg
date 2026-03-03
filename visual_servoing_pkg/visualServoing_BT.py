@@ -50,7 +50,7 @@ class visualServoingNode(Node):
         self.declareCameraParameters()
 
         # aruco parameters
-        self.initializeArucoParameters()
+        self.initializePlugHolderParameters()
 
         # socket (or holes) parameters
         self.initializeExtBoxParameters()
@@ -72,8 +72,8 @@ class visualServoingNode(Node):
         # ros2 comm parameters/variables
         self.data_read_group = ReentrantCallbackGroup()
         # sub
-        self.aruco_corner_sub = self.create_subscription(ArucoCorner, "/aruco_corners", self.corners_sub_cb, 10, callback_group=self.data_read_group)
-        self.aruco_pose_sub = self.create_subscription(Pose, "/aruco_pose", self.aruco_pose_sub_cb, 10, callback_group=self.data_read_group)
+        self.plug_bolt_sub = self.create_subscription(Int64MultiArray, "/bolt_coord", self.plug_bolt_sub_cb, 10, callback_group=self.data_read_group)
+        self.plug_holder_pose_sub = self.create_subscription(Pose, "/holder_pose", self.plug_holder_pose_sub_cb, 10, callback_group=self.data_read_group)
         self.matchPoints_sub = self.create_subscription(Int64MultiArray, "/screws_coord", self.matched_points_cb, 10, callback_group=self.data_read_group)
         self.holes_pose_sub = self.create_subscription(Pose, "/box_pose", self.box_pose_cb, 10, callback_group=self.data_read_group)
         self.servo_task_sub = self.create_subscription(String, "/servo_task", self.servo_task_cb, 1, callback_group=self.data_read_group)
@@ -110,7 +110,7 @@ class visualServoingNode(Node):
         ])
         self.ADeTc[3:6, 0:3] = etc_x @ self.eTc[0:3, 0:3]
 
-    def initializeArucoParameters(self):
+    def initializePlugHolderParameters(self):
         """
         Function to initialize and declare parameters related to aruco servoing
         Also computes desired interaction matrix for aruco desired points
@@ -118,34 +118,35 @@ class visualServoingNode(Node):
         # Order:
         # [top_left, top_right, bottom_right, bottom_left]
 
-        self.arucoTar_Z = 0.177
-        self.arucoPose = None
-        self.curArucoCorners = None
-        self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])        
-        self.desArucoCorners = np.array([
+        self.plugHolderTar_Z = 0.177
+        self.plugHolderPose = None
+        self.curPlugBolts = None
+        self.boltsDepth = np.array([-1.0, -1.0, -1.0, -1.0])        
+        self.desPlugBolts = np.array([
             [202, 186],
             [441, 174],
             [440, 310],
             [200, 305],
         ])
 
-        # aruco object points
-        self.markerLength = 0.025
-        self.aruco_object_points = np.array([
-            [-self.markerLength / 2, -self.markerLength / 2, 0],
-            [self.markerLength / 2, -self.markerLength / 2, 0],
-            [self.markerLength / 2, self.markerLength / 2, 0],
-            [-self.markerLength / 2, self.markerLength / 2, 0]
+        # plug-holder dim
+        width = 0.070
+        length = 0.040
+        self.holder_objectPoints = np.array([
+            [-width/2, -(length/2) + 0.005, 0],         # 5mm added for point1
+            [width/2, -length/2, 0],
+            [width/2, length/2, 0],
+            [-width/2, length/2, 0]
         ])
 
         # compute aruco desired interaction matrix - 8x6 matrix
         tempLst = []
-        for u, v in self.desArucoCorners:
+        for u, v in self.desPlugBolts:
             tempLst.append(
-                self.computeInteractionMatrix(u, v, self.arucoTar_Z)
+                self.computeInteractionMatrix(u, v, self.plugHolderTar_Z)
             )
-        self.aruco_desiredIntMat = np.vstack(tempLst)
-        self.aruco_currentIntMat = np.empty((8, 6))
+        self.plug_desiredIntMat = np.vstack(tempLst)
+        self.plug_currentIntMat = np.empty((8, 6))
 
     def initializeExtBoxParameters(self):
         """
@@ -191,30 +192,26 @@ class visualServoingNode(Node):
         else:
             self.servoTask = None
 
-    def corners_sub_cb(self, msg):
-        """Callback function to read current aruco corners"""
+    def plug_bolt_sub_cb(self, msg):
+        """Callback function to read current plug holder bolts"""
         
-        if (msg.top_left is not None and msg.top_left[0] != -1):
-            self.curArucoCorners = np.array([
-                msg.top_left,
-                msg.top_right,
-                msg.bottom_right,
-                msg.bottom_left
-            ])
+        if (msg.data is not None and (msg.data[0] != -1)):
+            # extract plug-holder bolts's coordinates
+            self.curPlugBolts = np.array(msg.data).reshape((4, 2))
         else:
-            self.curArucoCorners = None
+            self.curPlugBolts = None
 
-    def aruco_pose_sub_cb(self, msg):
-        """Callback function to read current aruco pose"""
+    def plug_holder_pose_sub_cb(self, msg):
+        """Callback function to read current plug holder pose"""
 
         if (msg.position is not None and msg.position.x != -1.0):
             # pose extraction
-            self.arucoPose = np.eye(4)
-            self.arucoPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
+            self.plugHolderPose = np.eye(4)
+            self.plugHolderPose[0:3, 3] = np.array([msg.position.x, msg.position.y, msg.position.z])
             rotm = Rotation.from_quat([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w]).as_matrix()
-            self.arucoPose[0:3, 0:3] = rotm
+            self.plugHolderPose[0:3, 0:3] = rotm
         else:
-            self.arucoPose = None
+            self.plugHolderPose = None
 
     def box_pose_cb(self, msg):
         """Callback function to read current ext-box pose"""
@@ -351,12 +348,15 @@ class visualServoingNode(Node):
         c = lam_inf
         
         # compute infinite norm of error vector (i.e., getting abs max of error vector)
+        x_norm = np.linalg.norm(self.pixelVel, np.inf)
+        """
         x_norm = 0.0
         for err in self.pixelVel:
             abs_err = abs(err[0])
             if (abs_err > x_norm):
                 x_norm = abs_err 
-
+        """
+                
         # adaptive gain (lam_adapt)
         lam_adapt = (a * np.exp(-1 * b * x_norm)) + c
 
@@ -391,23 +391,23 @@ class visualServoingNode(Node):
         """Function to compute camera velocity from pixel velocity"""
         
         # handle none cases
-        if ((self.servoTask == "servo_aruco" and self.curArucoCorners is None) or (self.servoTask == "servo_socket" and self.curScrews is None)):
+        if ((self.servoTask == "servo_aruco" and self.curPlugBolts is None) or (self.servoTask == "servo_socket" and self.curScrews is None)):
             self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             return
 
-        if (self.servoTask == "servo_aruco" and self.arucoPose is not None):
-            # ibvs on aruco
-            # compute depth of aruco corners
-            self.computeTargetDepth(self.aruco_object_points, self.arucoPose, self.cornerDepth)
+        if (self.servoTask == "servo_aruco" and self.plugHolderPose is not None):
+            # ibvs on plug holder
+            # compute depth of plug holder bolts
+            self.computeTargetDepth(self.holder_objectPoints, self.plugHolderPose, self.boltsDepth)
 
             # compute pixel velocities
-            self.pixelVel = self.computePixelVel(self.desArucoCorners, self.curArucoCorners)
+            self.pixelVel = self.computePixelVel(self.desPlugBolts, self.curPlugBolts)
 
             # compute current interaction matrix (feature jacobian)
-            self.aruco_currentIntMat = self.computeCurrentInteractionMat(self.curArucoCorners, self.cornerDepth)
+            self.plug_currentIntMat = self.computeCurrentInteractionMat(self.curPlugBolts, self.boltsDepth)
 
             # Approximation of Interaction Matrix - (8x6)
-            self.approxIntMat = (self.aruco_currentIntMat + self.aruco_desiredIntMat) / 2
+            self.approxIntMat = (self.plug_currentIntMat + self.plug_desiredIntMat) / 2
 
         elif (self.servoTask == "servo_socket" and self.boxPose is not None):
             # ibvs on socket

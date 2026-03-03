@@ -83,8 +83,8 @@ class moveAbovePick(py_trees.behaviour.Behaviour):
 
         # aruco conv to pick above
         self.acTpa = np.eye(4)
-        self.acTpa[0:3, 3] = np.array([0.02653083, -0.03003649, 0.08005753])
-        self.acTpa[0:3, 0:3] = Rotation.from_euler("xyz", [3.62705053, 1.10947527, 6.38303279], degrees=True).as_matrix()
+        self.acTpa[0:3, 3] = np.array([0.07281911, -0.03435075,  0.0975986])
+        self.acTpa[0:3, 0:3] = Rotation.from_euler("xyz", [2.25463710e-05, -1.07034064e-02,  2.62626922e-03], degrees=True).as_matrix()
 
         self.bot = realRobot
         self.isMoving = None

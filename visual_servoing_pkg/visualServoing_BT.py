@@ -118,15 +118,15 @@ class visualServoingNode(Node):
         # Order:
         # [top_left, top_right, bottom_right, bottom_left]
 
-        self.arucoTar_Z = 0.163
+        self.arucoTar_Z = 0.177
         self.arucoPose = None
         self.curArucoCorners = None
         self.cornerDepth = np.array([-1.0, -1.0, -1.0, -1.0])        
         self.desArucoCorners = np.array([
-            [270, 196],
-            [363, 196],
-            [363, 288],
-            [270, 289]
+            [202, 186],
+            [441, 174],
+            [440, 310],
+            [200, 305],
         ])
 
         # aruco object points

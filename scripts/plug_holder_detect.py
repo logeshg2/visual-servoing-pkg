@@ -67,10 +67,10 @@ class PlugDetector(Node):
         self.boxPose = None
         self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/plug_holder_best.pt")
         self.desiredScrews = np.array([
-            [184, 147],
-            [450, 147],
-            [449, 347],
-            [184, 349],
+            [202, 186],
+            [441, 174],
+            [440, 310],
+            [200, 305],
         ])
         self.prev_rvec = None
         self.prev_tvec = None

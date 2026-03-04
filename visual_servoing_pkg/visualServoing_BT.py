@@ -493,7 +493,7 @@ class visualServoingNode(Node):
         self.conv_status_pub.publish(conv_msg)
 
         # main control logic
-        if (self.servoTask == "servo_aruco" and self.arucoPose is None):
+        if (self.servoTask == "servo_aruco" and self.plugHolderPose is None):
             self.get_logger().warn(f"Aruco pose is none")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         elif (self.servoTask == "servo_socket" and self.boxPose is None):

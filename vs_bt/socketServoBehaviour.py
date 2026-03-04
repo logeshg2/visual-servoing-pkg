@@ -83,8 +83,8 @@ class moveAboveInsert(py_trees.behaviour.Behaviour):
 
         # box conv to insert above
         self.bcTia = np.eye(4)
-        self.bcTia[0:3, 3] = np.array([0.06289426, -0.02071626,  0.07633251])
-        self.bcTia[0:3, 0:3] = Rotation.from_euler("xyz", [3.81658362e-04, -1.56423169e-03,  3.92872137e-05], degrees=True).as_matrix()
+        self.bcTia[0:3, 3] = np.array([0.06474543, -0.0186528, 0.08215692])
+        self.bcTia[0:3, 0:3] = Rotation.from_euler("xyz", [0.07021153, -0.13663558, -2.33383179], degrees=True).as_matrix()
 
         self.bot = realRobot
         self.isMoving = None
@@ -157,7 +157,7 @@ class moveDownInsert(py_trees.behaviour.Behaviour):
 
         # insert above to insert
         self.iaTi = np.eye(4)
-        self.iaTi[0:3, 3] = np.array([0.0, 0.0, 0.029])
+        self.iaTi[0:3, 3] = np.array([0.0, 0.0, 0.024])
 
         self.bot = realRobot
         self.isMoving = None

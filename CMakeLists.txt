@@ -40,6 +40,7 @@ install(PROGRAMS
   scripts/plug_hole_detect.py
   scripts/extension_box_detect.py
   scripts/plug_holder_detect.py
+  scripts/ponnel_detect.py
   visual_servoing_pkg/ibvs_aruco_corner.py
   visual_servoing_pkg/pbvs_aruco_pose.py
   visual_servoing_pkg/ibvs_n_points.py

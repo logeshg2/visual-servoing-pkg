@@ -69,7 +69,7 @@ class stopSocketServo(py_trees.behaviour.Behaviour):
         self.blackboard.set("servoTask", self.servoTask)
 
         self.logger.info(f"Stopping socket servoing: {self.servoTask}")
-
+        exit(0)
         return py_trees.common.Status.SUCCESS
 
 

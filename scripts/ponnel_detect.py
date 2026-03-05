@@ -261,7 +261,7 @@ class PonnelDetector(Node):
         
         try:
             # detect the holes
-            result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.5, imgsz=320)[0]
+            result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.3, imgsz=320)[0]
             classes = result.boxes.cls.cpu().numpy()
             xyxy_arr = result.boxes.xyxy.cpu().numpy()
             xywh_arr = result.boxes.xywh.cpu().numpy()

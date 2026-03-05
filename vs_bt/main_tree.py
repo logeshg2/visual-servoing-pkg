@@ -76,7 +76,7 @@ def create_root(rosNode, realRobot):
         startSocketServo(),
         servoSocketUntilConv(),
         stopSocketServo(),
-        insertStaticMovements
+        # insertStaticMovements
     ])
 
     # high level composites
@@ -93,7 +93,7 @@ def create_root(rosNode, realRobot):
     taskSequence.add_children([
         move2Tracking(realRobot, look_for_trigger=True),
         openGripper(realRobot),
-        pickSubtree,
+        # pickSubtree,
         insertSubtree
     ])
 

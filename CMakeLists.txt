@@ -47,6 +47,7 @@ install(PROGRAMS
   visual_servoing_pkg/ibvs_plug_hole.py
   visual_servoing_pkg/ibvs_plug_pick_aruco.py
   visual_servoing_pkg/visualServoing_BT.py
+  visual_servoing_pkg/visualServoing_BT_pbvs.py
   visual_servoing_pkg/ibvs_extension_box.py
   DESTINATION lib/${PROJECT_NAME}
 )

@@ -415,12 +415,18 @@ class visualServoingNode(Node):
             dcTc = dcTo @ np.linalg.inv(cTo)
 
             camvel = np.zeros((6))
-            camvel[0:3] = - 0.3 * (dcTc[0:3, 0:3].T @ dcTc[0:3, 3])
+            camvel[0:3] = - 0.4 * (dcTc[0:3, 0:3].T @ dcTc[0:3, 3])
             camvel[3:6] = - 0.5 * Rotation.from_matrix(dcTc[0:3, 0:3]).as_rotvec()
+
+            posError = np.linalg.norm(dcTc[0:3, 3], ord=np.inf)
+            oriError = np.linalg.norm(Rotation.from_matrix(dcTc[0:3, 0:3]).as_rotvec(), ord=np.inf)
 
             self.camVel = camvel
 
         else:
+
+            posError = 10
+            oriError = 10
 
             self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -434,7 +440,8 @@ class visualServoingNode(Node):
         # self.camVel[3:6] = Wc.flatten()
 
         # check convergence
-        if (np.max(np.abs(self.camVel.flatten())) < 0.006):
+        print(np.round(self.camVel, 4))
+        if (np.max(np.abs(self.camVel.flatten()[0:3])) < 0.001):
             self.converged = True
             self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -511,7 +518,7 @@ class visualServoingNode(Node):
 
         # velocity filter (TODO: Kalman filter instead on moving average)
         self.eeVel = self.maVelFilter(self.eeVel)
-        print(np.round(self.eeVel, 4))
+        # print(np.round(self.eeVel, 4))
 
         # read the current cartesion position
         cur_joint_pose = self.bot.read_current_joint_position()

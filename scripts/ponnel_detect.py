@@ -6,13 +6,15 @@ The script uses YOLO from Ultralytics pkg with fine-tuned weights to detect bolt
 Using PnP, pose of the ponnel is also identified.
 """
 
+# NOTE: YOLO + PnP is depricated: -> Multi-Aruco + PnP
+
 import cv2
 import math
 import pickle
 import numpy as np
 import pyrealsense2 as rs
-import matplotlib.cm as cm
-from ultralytics import YOLO
+# import matplotlib.cm as cm
+# from ultralytics import YOLO
 from scipy.spatial.transform import Rotation
 
 import rclpy
@@ -66,7 +68,7 @@ class PonnelDetector(Node):
         # yolo screw + box model setup
         self.screws = None
         self.boxPose = None
-        self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/ponnel_best.pt")
+        # self.model = YOLO("/home/logesh/fanuc_ws/src/ObjectPose-simple/weights/ponnel_best.pt")
         self.desiredScrews = np.array([
             [202, 186],
             [441, 174],
@@ -76,12 +78,29 @@ class PonnelDetector(Node):
         self.prev_rvec = None
         self.prev_tvec = None
         # ponnel - dim
+        # self.ponnel_object_points = np.array([
+        #     [-(94/2)+5, -(94/2), 0.0],
+        #     [(94/2), -(94/2), 0.0],
+        #     [(94/2), (94/2), 0.0],
+        #     [-(94/2), (94/2), 0.0]
+        # ], dtype=np.float32) / 1000.0
+        
+        # multi-aruco config 
+        self.arucoOrder_id = {
+            0: 0,
+            1: 1,
+            2: 2,
+            4: 3
+        }
         self.ponnel_object_points = np.array([
-            [-(94/2)+5, -(94/2), 0.0],
-            [(94/2), -(94/2), 0.0],
-            [(94/2), (94/2), 0.0],
-            [-(94/2), (94/2), 0.0]
-        ], dtype=np.float32) / 1000.0
+            [-0.087/2, -0.081/2, 0],
+            [0.087/2, -0.083/2, 0],
+            [0.087/2, 0.083/2, 0],
+            [-0.087/2, 0.081/2, 0]
+        ])
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        aruco_param = cv2.aruco.DetectorParameters()
+        self.arucoDetector = cv2.aruco.ArucoDetector(aruco_dict, aruco_param)
 
         # ros2 communication variables
         self.cvBridge = CvBridge()
@@ -260,6 +279,7 @@ class PonnelDetector(Node):
             return
         
         try:
+            """
             # detect the holes
             result = self.model.predict(self.color_frame, stream=False, save=False, conf=0.3, imgsz=320)[0]
             classes = result.boxes.cls.cpu().numpy()
@@ -272,13 +292,29 @@ class PonnelDetector(Node):
             # plot desired holes coord
             for idx, xywh in enumerate(self.desiredScrews):
                 cv2.circle(self.color_frame, (int(xywh[0]), int(xywh[1])), 2, (0, 0, 255), -1)
+            """
+            
+            # detect aruco
+            corners_arr, ids_arr, rej = self.arucoDetector.detectMarkers(self.color_frame)
 
-            if (len(classes) >= 6):
-                # solve correspondence problem
-                self.solveCorrespondence(classes, xyxy_arr, xywh_arr)
+            if (ids_arr is not None and len(ids_arr) == 4):
+                # compute mids of aruco's 
+                mids = np.empty((4, 2), dtype=np.int64)
+                for id, corners in zip(ids_arr, corners_arr):
+                    id = id[0]
+                    corners = np.int64(corners).reshape((4, 2))
+                    pt1 = corners[0]
+                    pt3 = corners[2]
+                    mx = (pt1[0] + pt3[0]) // 2
+                    my = (pt1[1] + pt3[1]) // 2
+                    mids[self.arucoOrder_id[id]] = [mx, my]
+
+                # plot mids
+                for idx, c_xy in enumerate(mids):
+                    cv2.circle(self.color_frame, c_xy, 2, (0, 255, 0), -1)
 
                 # compute pose
-                imagePoints = np.float64(self.screws)        # remove point 1
+                imagePoints = np.float64(mids)
 
                 # 1st iteration
                 if (self.prev_rvec is None):
@@ -352,9 +388,9 @@ class PonnelDetector(Node):
         cv2.arrowedLine(self.color_frame, self.frame_center, [self.frame_center[0], self.frame_center[1] + 100], (0,255,0), 2)     # Y
 
         # publish matched point (if available)
-        if (self.screws is not None):
+        if (self.boxPose is not None):
             msg1 = Int64MultiArray()
-            msg1.data = self.screws.flatten().tolist()
+            msg1.data = [-1] #self.screws.flatten().tolist()
             self.matchPoints_publisher.publish(msg1)
 
             # box pose

@@ -165,7 +165,7 @@ class PBVS_aruco(Node):
         # ros2 comm variables
         self.tf_broadcaster = TransformBroadcaster(self)
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
-        self.pose_sub = self.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
+        self.pose_sub = self.create_subscription(Pose, "/box_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
         self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
 
@@ -282,7 +282,7 @@ class PBVS_aruco(Node):
 
         # desired camera to object transform (dcTo)
         dcTo = np.eye(6)
-        dcTo[0:3, 3] = np.array([0, 0,  0.4])                       # desired trasform should be 30cm above the aruco board
+        dcTo[0:3, 3] = np.array([0, 0,  0.2])                       # desired trasform should be 30cm above the aruco board
         dcTo_t = dcTo[0:3, 3].reshape((3,1))
 
         # Adaptive gain (lambda_adapt)

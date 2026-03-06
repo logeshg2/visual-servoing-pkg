@@ -42,6 +42,7 @@ class ArucoNode(Node):
         K_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/camera_matrix_rs.pkl", "rb")
         dist_fp = open("/home/logesh/fanuc_ws/src/visual-servoing-pkg/config/dist_coef_rs.pkl", "rb")
         self.K = pickle.load(K_fp)
+        self.K[0][2] = 320.0
         self.camDist = np.float64(pickle.load(dist_fp))
 
         # logging
@@ -50,8 +51,8 @@ class ArucoNode(Node):
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
         # aruco detector
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
-        self.markerLength = 0.025
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+        self.markerLength = 0.1
         parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
         self.aruco_center = None

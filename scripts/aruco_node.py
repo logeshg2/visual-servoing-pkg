@@ -6,6 +6,7 @@ Aruco is used in this script.
 """
 
 import cv2
+import csv
 import pickle
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -51,8 +52,8 @@ class ArucoNode(Node):
         self.get_logger().info(f"Image frame height: {self.frame_height}")
 
         # aruco detector
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        self.markerLength = 0.1
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_250)
+        self.markerLength = 0.035
         parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
         self.aruco_center = None
@@ -132,13 +133,28 @@ class ArucoNode(Node):
             _, rvec, tvec = cv2.solvePnP(object_points, np.array(self.corner), self.K, self.camDist, False, flags=cv2.SOLVEPNP_EPNP )
             # _, rvec, tvec, inliers = cv2.solvePnPRansac(object_points, np.array(self.corner), self.K, self.camDist)
             if (_):
-                cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.05, 3)
+                # cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.05, 3)
                 rvec = rvec.flatten()
                 tvec = tvec.flatten()
                 quat = Rotation.from_rotvec(rvec).as_quat()
                 self.aruco_pose = {'tvec': tvec, 'quat': quat}
                 # plot corners frame (testing for ibvs) - for Z value of corner points
                 # self.plotCornersDepth(tvec, rvec, object_points)
+
+                # box pose from aruco pose
+                aTb = np.eye(4)
+                aTb[0, 3] = - (0.047 + (0.035/2)) 
+                cTa = np.eye(4)
+                cTa[0:3, 3] = tvec
+                cTa[0:3, 0:3] = Rotation.from_quat(quat).as_matrix()
+                cTb = cTa @ aTb
+                tvec = cTb[0:3, 3].flatten()
+                quat = Rotation.from_matrix(cTb[0:3, 0:3]).as_quat()
+                rvec = Rotation.from_matrix(cTb[0:3, 0:3]).as_rotvec()
+                self.aruco_pose = {'tvec': tvec, 'quat': quat}
+                # draw box frame
+                cv2.drawFrameAxes(self.latest_image, self.K, self.camDist, rvec, tvec, 0.05, 3)
+
             else:
                 self.aruco_pose = None
         else:

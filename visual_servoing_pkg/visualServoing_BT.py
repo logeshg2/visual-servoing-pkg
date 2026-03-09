@@ -15,6 +15,8 @@ from std_msgs.msg import String, Int64MultiArray
 from rclpy.callback_groups import ReentrantCallbackGroup
 
 import cv2
+import csv
+import time
 import pickle
 import pinocchio
 import numpy as np
@@ -68,6 +70,10 @@ class visualServoingNode(Node):
         ])
         self.maIdx = 0
 
+        # log EE pose
+        fp = open("/home/logesh/Desktop/ibvs_ee_pose.csv", "w")
+        self.ee_pose_writer = csv.writer(fp)
+        self.startTime = None
 
         # ros2 comm parameters/variables
         self.data_read_group = ReentrantCallbackGroup()
@@ -438,6 +444,11 @@ class visualServoingNode(Node):
             self.converged = True
             self.camVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
+            print()
+            print("Time taken: ", time.perf_counter() - self.startTime)
+            print()
+            exit(0)
+
     def computeEEVel(self):
         """Function to compute end effector velocity (form camera velocity)"""
         
@@ -500,6 +511,8 @@ class visualServoingNode(Node):
             self.get_logger().warn(f"Socket pose is none")
             self.eeVel = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         elif (self.servoTask == "servo_aruco" or self.servoTask == "servo_socket"):
+            if (self.startTime is None):
+                self.startTime = time.perf_counter()
             # compute ee velocity
             self.converged = False
             self.aruco_conv = False
@@ -536,6 +549,9 @@ class visualServoingNode(Node):
         # self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")
         self.bot.write_joint_pose(target_joint_pose, blocking=False)
 
+        # log ee pose
+        ee_pose = self.bot.read_current_cartesian_pose()
+        self.ee_pose_writer.writerow(ee_pose)
 
 def main():
     rclpy.init()

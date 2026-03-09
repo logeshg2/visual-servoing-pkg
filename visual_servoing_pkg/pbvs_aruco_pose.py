@@ -162,12 +162,25 @@ class PBVS_aruco(Node):
         ])
         self.maIdx = 0
 
+        self.startTime = None
+
         # ros2 comm variables
         self.tf_broadcaster = TransformBroadcaster(self)
         self.vel_gen_group = MutuallyExclusiveCallbackGroup()
-        self.pose_sub = self.create_subscription(Pose, "/box_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
+        self.pose_sub = self.create_subscription(Pose, "/aruco_pose", self.pose_sub_cb, 10, callback_group=self.vel_gen_group)
         self.inc_srv_trig = self.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
         self.main_timer = self.create_timer(1/100, self.main_timer_cb, self.vel_gen_group)
+
+        # csv logging stuff
+        # log aruco pose
+        # fp = open("/home/logesh/Desktop/arucoPose.csv", "w")
+        # fp1 = open("/home/logesh/Desktop/pbvs_camvel.csv", "w")
+        # fp2 = open("/home/logesh/Desktop/pbvs_joint_pos.csv", "w")
+        # self.pose_writer = csv.writer(fp)
+        # self.camvel_writer = csv.writer(fp1)
+        # self.q_writer = csv.writer(fp2)
+        fp = open("/home/logesh/Desktop/pbvs_ee_pose.csv","w")
+        self.ee_pose_writer = csv.writer(fp)
 
 
     def trigger_servoing_cb(self, request, response):
@@ -181,6 +194,8 @@ class PBVS_aruco(Node):
         time.sleep(2)
         while (self.bot.is_moving()):
             time.sleep(0.1)
+
+        self.startTime = time.perf_counter()
 
         response.success = True
         response.message = "trigger successful"
@@ -270,6 +285,12 @@ class PBVS_aruco(Node):
         # camVel[0:3, :] -> translation camera velocity (Vc)
         # camVel[3:6, :] -> rotation camera velocity (Wc) 
 
+        # log pose to csv
+        # lst = []
+        # lst.extend(self.arucoPose[0:3, 3].tolist())
+        # lst.extend(Rotation.from_matrix(self.arucoPose[0:3, 0:3]).as_rotvec().tolist())
+        # self.pose_writer.writerow(lst)
+
         # current camera to object transform (cTo)
         cTo = self.arucoPose
         cTo_t = cTo[0:3, 3].reshape((3,1))
@@ -282,7 +303,7 @@ class PBVS_aruco(Node):
 
         # desired camera to object transform (dcTo)
         dcTo = np.eye(6)
-        dcTo[0:3, 3] = np.array([0, 0,  0.2])                       # desired trasform should be 30cm above the aruco board
+        dcTo[0:3, 3] = np.array([0, 0,  0.25])                       # desired trasform should be 30cm above the aruco board
         dcTo_t = dcTo[0:3, 3].reshape((3,1))
 
         # Adaptive gain (lambda_adapt)
@@ -292,6 +313,12 @@ class PBVS_aruco(Node):
         self.setAdaptiveGain(0.3, 0.2, 30.0, errorArray)           # default - [1.666, 0.666, 1.666] 
         # tuning adaptive gain parameter using constant lambda
         # self.lambdaVar = 0.3                              # uncomment and tune lambda 0, and inf
+
+        if (np.max(np.abs(errorArray)) < 0.01):
+            print()
+            print(time.perf_counter() - self.startTime)
+            print()
+            exit(0)
 
         # compute velocity
         Vc = -1 * self.lambdaVar * ((dcTo_t - cTo_t) + (cto_x @ cTo_thetaU))
@@ -308,6 +335,9 @@ class PBVS_aruco(Node):
             # compute camera velocity
             camVel = self.computeCamVel()
 
+            # log cam vel
+            # self.camvel_writer.writerow(camVel.flatten())
+
             # camera velocity to end effector velocity
             # using adjoint transformation (Ad_eTc)
             self.ee_vel = (self.ADeTc @ camVel).flatten()           # (6,)
@@ -320,6 +350,9 @@ class PBVS_aruco(Node):
             self.ee_vel[4] *= -1
             self.ee_vel[5] *= -1
             
+
+            # log ee pose
+            self.ee_pose_writer.writerow(self.bot.read_current_cartesian_pose())
 
             # log ee_vel and camvel
             """
@@ -478,6 +511,9 @@ class PBVS_aruco(Node):
             # adding coupling - J[3]' = J[3] - J[2]
             target_rad_arr[2] = target_rad_arr[2] - target_rad_arr[1]
             target_joint_pose = np.rad2deg(target_rad_arr).tolist()
+
+            # log joint position (in deg)
+            # self.q_writer.writerow(target_joint_pose)
 
             # write register and sync-movement
             # self.get_logger().info(f"Computed Joint Position: {np.round(target_joint_pose, 4)}")

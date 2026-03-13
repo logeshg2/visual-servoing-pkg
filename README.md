@@ -10,7 +10,7 @@ Working branch: plug_pick_insert_bt
 
 The repository depends on <a href="https://github.com/logeshg2/fanuc_ros2_drivers" target="_blank">Fanuc ROS2 Driver</a> package for read robot control.
 
-The implementation of this visual servoing was done using the reference of following papers and implementations:
+The implementation of this visual servoing packages was done using the reference from the following papers:
 
 1. Visual servo control, Part I: Basic approaches: <a href="https://www.irisa.fr/lagadic/pdf/2006_ieee_ram_chaumette.pdf" target="_blank">Link</a>
 
@@ -43,4 +43,4 @@ The implementation of this visual servoing was done using the reference of follo
 
 ### Visual Servoing Plus Assembly Task (Demo):
 
-{% include video id="lK--YVCa8BM" provider="youtube" %}
+[![Watch the video](https://img.youtube.com/vi/lK--YVCa8BM/0.jpg)](https://www.youtube.com/watch?v=lK--YVCa8BM)

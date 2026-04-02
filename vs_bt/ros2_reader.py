@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+
+"""
+Behaviour Script to read required ros2 messages and write / update to py_trees blackboard.
+This be behaviour will be called every time to update the blackboard.
+"""
+
+import py_trees
+import numpy as np
+from scipy.spatial.transform import Rotation
+
+import rclpy
+from cv_bridge import CvBridge
+from std_msgs.msg import String
+from std_srvs.srv import SetBool
+from rclpy.callback_groups import ReentrantCallbackGroup
+
+
+class ReadfromROS(py_trees.behaviour.Behaviour):
+    def __init__(self, node):
+        self.name = "read_from_ros"
+        super(ReadfromROS, self).__init__(self.name)
+
+        # ros2 communication variables (initializing)
+        self.node = node
+        self.servoTask = "no_servo"
+        self.converged_aruco = False
+        self.converged_socket = False
+        self.triggered = False
+        self.data_read_group = ReentrantCallbackGroup()
+        self.cv_bridge = CvBridge()
+
+        self.blackboard = py_trees.blackboard.Blackboard()
+
+    def setup(self):
+        """Setup ros2 nodes"""
+
+        # set blackboard value to default
+        self.blackboard.set("triggered", self.triggered)
+        self.blackboard.set("converged_aruco", self.converged_aruco)
+        self.blackboard.set("converged_socket", self.converged_socket)
+        self.blackboard.set("servoTask", self.servoTask)
+
+        # ros2 subscription
+        self.conv_status_sub = self.node.create_subscription(String, "/converged_status", self.conv_status_cb, 1, callback_group=self.data_read_group)
+
+        # ros2 publishers
+        self.servo_task_pub = self.node.create_publisher(String, "/servo_task", 1)
+
+        # ros2 service
+        self.trigger_srv = self.node.create_service(SetBool, '/trigger_servoing', self.trigger_servoing_cb)
+
+    def conv_status_cb(self, msg):
+        """Callback function to read convergence status from ros2 vs node"""
+
+        if (msg.data is not None):
+            self.converged_aruco = (msg.data == "1_aruco")
+            self.converged_socket = (msg.data == "1_socket")
+        else:
+            self.converged = False
+
+    def trigger_servoing_cb(self, request, response):
+        if (request.data):
+            self.triggered = True
+        else:
+            self.triggered = False
+
+        response.success = True
+        response.message = "trigger successful"
+        return response
+
+    def update(self):
+        """Update blackboard"""
+        
+        self.servoTask = self.blackboard.get("servoTask")
+        
+        try:
+            rclpy.spin_once(self.node, timeout_sec=0.0)
+
+            # set blackboard value to default
+            self.blackboard.set("triggered", self.triggered)
+            self.blackboard.set("converged_aruco", self.converged_aruco)
+            self.blackboard.set("converged_socket", self.converged_socket)
+
+            # publish servoTask to ros2 VS node
+            msg = String()
+            msg.data = self.servoTask
+            self.servo_task_pub.publish(msg)
+
+            return py_trees.common.Status.RUNNING       # parallel - continue to read data from ros
+        except Exception as e:
+            self.node.get_logger().warn(f"Exceptino while updating blackboard: {e}")
+            return py_trees.common.Status.FAILURE
